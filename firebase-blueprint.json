@@ -1,0 +1,130 @@
+{
+  "entities": {
+    "isgg_absences": {
+      "title": "ISGG Absence Records",
+      "description": "Student absence tracking records",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "subjectId": { "type": "string" },
+        "date": { "type": "string" },
+        "timeSlot": { "type": "string" },
+        "reason": { "type": "string" },
+        "justified": { "type": "boolean" },
+        "justificationReason": { "type": "string" },
+        "justificationDate": { "type": "string" },
+        "recordedBy": { "type": "string" },
+        "recordedAt": { "type": "string" }
+      },
+      "required": ["id", "studentId", "subjectId", "date", "timeSlot", "justified", "recordedBy", "recordedAt"]
+    },
+    "isgg_students": {
+      "title": "ISGG Student",
+      "description": "Student profile and enrollment",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "matricule": { "type": "string" },
+        "firstName": { "type": "string" },
+        "lastName": { "type": "string" },
+        "programId": { "type": "string" },
+        "level": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "parentPhone": { "type": "string" },
+        "avatarUrl": { "type": "string" }
+      },
+      "required": ["id", "matricule", "firstName", "lastName", "programId", "level"]
+    },
+    "isgg_subjects": {
+      "title": "ISGG Subject",
+      "description": "Academic course subject",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "programId": { "type": "string" },
+        "teacher": { "type": "string" },
+        "totalHours": { "type": "number" },
+        "credits": { "type": "number" }
+      },
+      "required": ["id", "code", "name", "programId", "teacher"]
+    },
+    "isgg_programs": {
+      "title": "ISGG Program",
+      "description": "Academic departments/programs",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "headOfDepartment": { "type": "string" }
+      },
+      "required": ["id", "code", "name"]
+    },
+    "isgg_notifications": {
+      "title": "ISGG Notification",
+      "description": "System notices and absence alerts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "time": { "type": "string" },
+        "read": { "type": "boolean" },
+        "type": { "type": "string" }
+      },
+      "required": ["id", "title", "description", "read"]
+    },
+    "isgg_metadata": {
+      "title": "ISGG System Metadata",
+      "description": "School year and shared config",
+      "type": "object",
+      "properties": {
+        "activeSchoolYear": { "type": "object" },
+        "updatedAt": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "isgg_absences": {
+      "rules": {
+        "read": "true",
+        "write": "true"
+      }
+    },
+    "isgg_students": {
+      "rules": {
+        "read": "true",
+        "write": "true"
+      }
+    },
+    "isgg_subjects": {
+      "rules": {
+        "read": "true",
+        "write": "true"
+      }
+    },
+    "isgg_programs": {
+      "rules": {
+        "read": "true",
+        "write": "true"
+      }
+    },
+    "isgg_notifications": {
+      "rules": {
+        "read": "true",
+        "write": "true"
+      }
+    },
+    "isgg_metadata": {
+      "rules": {
+        "read": "true",
+        "write": "true"
+      }
+    }
+  }
+}

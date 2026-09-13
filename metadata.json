@@ -1,0 +1,6 @@
+{
+  "name": "ISGG Absences",
+  "description": "Plateforme institutionnelle de suivi et d'enregistrement de l'assiduité des étudiants de l'Institut Supérieur de Génie Civil et de Gestion.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

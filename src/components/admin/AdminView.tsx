@@ -1,0 +1,779 @@
+import React, { useState, useMemo } from 'react';
+import { 
+  Shield, 
+  Users, 
+  Building, 
+  BookOpen, 
+  UserCheck, 
+  Calendar, 
+  Settings, 
+  Plus, 
+  Edit, 
+  Trash2, 
+  Check, 
+  X, 
+  AlertCircle,
+  Sparkles
+} from 'lucide-react';
+import { storage } from '../../lib/storage';
+import { User, Program, Subject, Level } from '../../types';
+import { useToast } from '../common/Toast';
+
+interface AdminViewProps {
+  currentUser: User;
+}
+
+export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
+  const { showToast } = useToast();
+  const [activeTab, setActiveTab] = useState<'students' | 'programs' | 'subjects' | 'users' | 'school-year'>('students');
+
+  // Programs & Levels
+  const [programs, setPrograms] = useState<Program[]>(storage.getAllPrograms());
+  const levels = useMemo(() => storage.getLevels(), []);
+  const [subjects, setSubjects] = useState<Subject[]>(storage.getAllSubjects());
+  const [users, setUsers] = useState<User[]>(storage.getUsers());
+  const [studentsList, setStudentsList] = useState(storage.getStudents());
+
+  // Editing Program Groups modal/panel state
+  const [editingProgramGroupsId, setEditingProgramGroupsId] = useState<string | null>(null);
+  const [customGroupInput, setCustomGroupInput] = useState('');
+
+  // Editing Student Group modal/panel state
+  const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
+  const [studentEditGroup, setStudentEditGroup] = useState('A');
+
+  // Form states for New Student
+  const [isAddingStudent, setIsAddingStudent] = useState(false);
+  const [newMatricule, setNewMatricule] = useState('');
+  const [newLastName, setNewLastName] = useState('');
+  const [newFirstName, setNewFirstName] = useState('');
+  const [newProgramId, setNewProgramId] = useState(programs[0]?.id || 'prog-gi');
+  const [newLevelId, setNewLevelId] = useState(levels[0]?.id || 'lvl-l1');
+  const [newClassGroup, setNewClassGroup] = useState('A');
+
+  // Refresh helper
+  const refreshData = () => {
+    setPrograms([...storage.getAllPrograms()]);
+    setStudentsList([...storage.getStudents()]);
+    setSubjects([...storage.getAllSubjects()]);
+  };
+
+  // Form states for New Subject
+  const [isAddingSubject, setIsAddingSubject] = useState(false);
+  const [newSubjectName, setNewSubjectName] = useState('');
+  const [newSubjectCode, setNewSubjectCode] = useState('');
+  const [newSubjectTeacher, setNewSubjectTeacher] = useState('');
+  const [newSubjectProgramId, setNewSubjectProgramId] = useState(programs[0]?.id || 'prog-gi');
+  const [newSubjectLevelId, setNewSubjectLevelId] = useState(levels[0]?.id || 'lvl-l2');
+
+  // If user is not admin, show permission notice with quick test switch
+  if (currentUser.role !== 'ADMIN') {
+    return (
+      <div className="bg-white rounded-3xl p-12 border border-slate-200 text-center max-w-lg mx-auto space-y-4 my-12 shadow-sm">
+        <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto">
+          <Shield className="w-8 h-8" />
+        </div>
+        <h2 className="text-xl font-bold text-slate-900">Espace réservé à la Direction</h2>
+        <p className="text-xs text-slate-500 leading-relaxed">
+          Votre compte actuel ({currentUser.name}) dispose du rôle <strong>SURVEILLANT</strong>. Les fonctions d&apos;administration, de paramétrage des filières et de gestion des comptes sont réservées aux administrateurs.
+        </p>
+        <button
+          onClick={() => storage.switchRole('ADMIN')}
+          className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-colors cursor-pointer"
+        >
+          Basculer en profil Administrateur (Dr. K. Mensah)
+        </button>
+      </div>
+    );
+  }
+
+  // Handle Add Student
+  const handleCreateStudent = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newLastName.trim() || !newFirstName.trim() || !newMatricule.trim()) {
+      showToast('Veuillez remplir tous les champs obligatoires', 'error');
+      return;
+    }
+
+    try {
+      storage.saveStudent({
+        matricule: newMatricule.trim().toUpperCase(),
+        lastName: newLastName.trim().toUpperCase(),
+        firstName: newFirstName.trim(),
+        programId: newProgramId,
+        levelId: newLevelId,
+        classGroup: (newClassGroup || 'A').trim().toUpperCase(),
+        isActive: true,
+      });
+
+      refreshData();
+      showToast(`Étudiant ${newLastName.toUpperCase()} ${newFirstName} (Classe ${newClassGroup}) ajouté avec succès`, 'success');
+      setIsAddingStudent(false);
+      setNewMatricule('');
+      setNewLastName('');
+      setNewFirstName('');
+      setNewClassGroup('A');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erreur';
+      showToast(msg, 'error');
+    }
+  };
+
+  // Handle Quick Student Group Change
+  const handleUpdateStudentGroup = (studentId: string, group: string) => {
+    const cleanGroup = (group || 'A').trim().toUpperCase();
+    const stu = storage.getStudentById(studentId);
+    if (!stu) return;
+
+    storage.saveStudent({
+      id: stu.id,
+      matricule: stu.matricule,
+      lastName: stu.lastName,
+      firstName: stu.firstName,
+      programId: stu.programId,
+      levelId: stu.levelId,
+      classGroup: cleanGroup,
+      email: stu.email,
+      phone: stu.phone,
+      avatarUrl: stu.avatarUrl,
+      isActive: stu.isActive,
+    });
+
+    refreshData();
+    setEditingStudentId(null);
+    showToast(`Classe de ${stu.lastName} ${stu.firstName} mise à jour : Groupe ${cleanGroup}`, 'success');
+  };
+
+  // Add group to program (e.g. adding 'C' to Génie Informatique or another filière)
+  const handleAddGroupToProgram = (programId: string, groupToAdd: string) => {
+    const cleanGroup = groupToAdd.trim().toUpperCase();
+    if (!cleanGroup) return;
+
+    const currentGroups = storage.getProgramGroups(programId);
+    if (currentGroups.includes(cleanGroup)) {
+      showToast(`Le groupe ${cleanGroup} existe déjà pour cette filière`, 'info');
+      return;
+    }
+
+    const updated = [...currentGroups, cleanGroup].sort();
+    storage.setProgramGroups(programId, updated);
+    refreshData();
+    setCustomGroupInput('');
+    showToast(`Groupe ${cleanGroup} ajouté avec succès à la filière`, 'success');
+  };
+
+  // Remove group from program
+  const handleRemoveGroupFromProgram = (programId: string, groupToRemove: string) => {
+    const currentGroups = storage.getProgramGroups(programId);
+    if (currentGroups.length <= 1) {
+      showToast('Une filière doit conserver au minimum un groupe (ex: A)', 'error');
+      return;
+    }
+
+    const updated = currentGroups.filter(g => g !== groupToRemove);
+    storage.setProgramGroups(programId, updated);
+    refreshData();
+    showToast(`Groupe ${groupToRemove} retiré de la filière`, 'info');
+  };
+
+  // Handle Add Subject
+  const handleCreateSubject = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSubjectName.trim() || !newSubjectCode.trim()) {
+      showToast('Veuillez remplir le nom et le code matière', 'error');
+      return;
+    }
+
+    storage.saveSubject({
+      name: newSubjectName.trim(),
+      code: newSubjectCode.trim().toUpperCase(),
+      teacherName: newSubjectTeacher.trim() || 'Enseignant non désigné',
+      programId: newSubjectProgramId,
+      levelId: newSubjectLevelId,
+    });
+
+    setSubjects(storage.getAllSubjects());
+    showToast(`Matière ${newSubjectName} enregistrée`, 'success');
+    setIsAddingSubject(false);
+    setNewSubjectName('');
+    setNewSubjectCode('');
+    setNewSubjectTeacher('');
+  };
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-300">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl lg:text-3xl font-extrabold text-slate-900 tracking-tight">
+              Administration ISGG
+            </h1>
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-100 text-emerald-800">
+              Directeur
+            </span>
+          </div>
+          <p className="text-sm font-medium text-slate-500 mt-1">
+            Gestion du référentiel académique, des matières, des filières et des utilisateurs
+          </p>
+        </div>
+      </div>
+
+      {/* Navigation Tabs */}
+      <div className="bg-white rounded-2xl p-2 border border-slate-200/80 shadow-xs flex items-center gap-2 overflow-x-auto">
+        <button
+          onClick={() => setActiveTab('students')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+            activeTab === 'students' ? 'bg-[#EA580C] text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          <span>Gestion des Étudiants</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('programs')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+            activeTab === 'programs' ? 'bg-[#EA580C] text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Building className="w-4 h-4" />
+          <span>Filières ISGG ({programs.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('subjects')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+            activeTab === 'subjects' ? 'bg-[#EA580C] text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <BookOpen className="w-4 h-4" />
+          <span>Matières ({subjects.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('users')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+            activeTab === 'users' ? 'bg-[#EA580C] text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <UserCheck className="w-4 h-4" />
+          <span>Utilisateurs & Rôles ({users.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('school-year')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+            activeTab === 'school-year' ? 'bg-[#EA580C] text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Calendar className="w-4 h-4" />
+          <span>Année académique</span>
+        </button>
+      </div>
+
+      {/* TAB 1: GESTION DES ÉTUDIANTS */}
+      {activeTab === 'students' && (
+        <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-bold text-slate-900">Enrôlement et inscription des étudiants</h3>
+              <p className="text-xs text-slate-500">Ajoutez manuellement ou importez de nouveaux apprenants</p>
+            </div>
+            <button
+              onClick={() => setIsAddingStudent(!isAddingStudent)}
+              className="px-4 py-2 rounded-xl bg-[#EA580C] hover:bg-[#D94600] text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>{isAddingStudent ? 'Annuler' : 'Ajouter un étudiant'}</span>
+            </button>
+          </div>
+
+          {/* Add Student Form Drawer */}
+          {isAddingStudent && (
+            <form onSubmit={handleCreateStudent} className="p-5 rounded-2xl bg-orange-50/50 border border-orange-200/80 space-y-4 animate-in fade-in">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-[#EA580C]">Nouvelle inscription</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Matricule ISGG *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newMatricule}
+                    onChange={e => setNewMatricule(e.target.value)}
+                    placeholder="ex: ISGG-2024-099"
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Nom de famille *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newLastName}
+                    onChange={e => setNewLastName(e.target.value)}
+                    placeholder="ex: SOSSOU"
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Prénom(s) *</label>
+                  <input
+                    type="text"
+                    required
+                    value={newFirstName}
+                    onChange={e => setNewFirstName(e.target.value)}
+                    placeholder="ex: Jean-Luc"
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Filière</label>
+                  <select
+                    value={newProgramId}
+                    onChange={e => setNewProgramId(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold cursor-pointer"
+                  >
+                    {programs.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Classe / Groupe</label>
+                  <select
+                    value={newClassGroup}
+                    onChange={e => setNewClassGroup(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold cursor-pointer"
+                  >
+                    {storage.getProgramGroups(newProgramId).map(grp => (
+                      <option key={grp} value={grp}>Groupe {grp} (Classe {grp})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Niveau / Année d&apos;étude</label>
+                  <select
+                    value={newLevelId}
+                    onChange={e => setNewLevelId(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold cursor-pointer"
+                  >
+                    {levels.map(l => (
+                      <option key={l.id} value={l.id}>{l.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddingStudent(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl text-xs font-bold text-white bg-[#EA580C] hover:bg-[#D94600]"
+                >
+                  Enregistrer l&apos;étudiant
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Student List with fast Group Re-assignment */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-bold text-slate-900">
+                Liste des étudiants inscrits ({studentsList.length})
+              </h4>
+              <span className="text-[11px] text-slate-500">
+                Modifiez la classe (A, B, C...) directement pour chaque étudiant
+              </span>
+            </div>
+
+            <div className="border border-slate-200 rounded-2xl overflow-hidden divide-y divide-slate-100 max-h-96 overflow-y-auto">
+              {studentsList.map(stu => {
+                const prog = programs.find(p => p.id === stu.programId);
+                const lvl = levels.find(l => l.id === stu.levelId);
+                const availableGroups = prog ? storage.getProgramGroups(prog.id) : ['A', 'B'];
+                const isEditing = editingStudentId === stu.id;
+
+                return (
+                  <div key={stu.id} className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50 transition-colors">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-slate-200 text-slate-700 font-bold text-xs flex items-center justify-center">
+                        {stu.lastName.slice(0, 1)}{stu.firstName.slice(0, 1)}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-slate-900 text-xs">{stu.lastName} {stu.firstName}</span>
+                          <span className="font-mono text-[10px] text-slate-400">({stu.matricule})</span>
+                        </div>
+                        <p className="text-[11px] text-slate-500">
+                          {prog?.code || 'ISGG'} • {lvl?.name}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      {isEditing ? (
+                        <div className="flex items-center gap-1.5 bg-orange-50 border border-[#EA580C] p-1.5 rounded-xl animate-in fade-in">
+                          <span className="text-[11px] font-bold text-slate-700 pl-1">Groupe :</span>
+                          <select
+                            value={studentEditGroup}
+                            onChange={e => setStudentEditGroup(e.target.value)}
+                            className="bg-white px-2 py-1 rounded text-xs font-bold border border-slate-300"
+                          >
+                            {availableGroups.map(g => (
+                              <option key={g} value={g}>Classe {g}</option>
+                            ))}
+                          </select>
+                          <button
+                            onClick={() => handleUpdateStudentGroup(stu.id, studentEditGroup)}
+                            className="p-1 rounded-lg bg-[#EA580C] text-white hover:bg-[#D94600]"
+                            title="Valider"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setEditingStudentId(null)}
+                            className="p-1 rounded-lg bg-slate-200 text-slate-600 hover:bg-slate-300"
+                            title="Annuler"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-black px-2.5 py-1 rounded-lg bg-orange-100 text-[#EA580C] border border-orange-200">
+                            Classe {stu.classGroup || 'A'}
+                          </span>
+                          <button
+                            onClick={() => {
+                              setEditingStudentId(stu.id);
+                              setStudentEditGroup(stu.classGroup || 'A');
+                            }}
+                            className="p-1.5 rounded-lg border border-slate-200 text-slate-500 hover:text-[#EA580C] hover:bg-white hover:border-orange-300 text-xs transition-colors cursor-pointer"
+                            title="Changer de classe / groupe"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Quick instructions for import */}
+          <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 flex items-center justify-between">
+            <span>Importation massive d&apos;effectifs étudiants disponible au format CSV / Excel standard ISGG.</span>
+            <button
+              onClick={() => showToast('Gabarit CSV téléchargé (Exemple disponible dans la documentation)', 'info')}
+              className="font-bold text-[#EA580C] hover:underline"
+            >
+              Télécharger gabarit
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: FILIÈRES */}
+      {activeTab === 'programs' && (
+        <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <h3 className="text-base font-bold text-slate-900">Filières académiques et gestion des groupes / classes</h3>
+              <p className="text-xs text-slate-500">
+                Configurez les divisions en classes (A, B, C...) pour la Génie Informatique et toute autre filière
+              </p>
+            </div>
+            <span className="text-xs font-bold text-[#EA580C] bg-orange-50 px-3 py-1.5 rounded-xl border border-orange-200">
+              {programs.length} filières actives
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {programs.map(prog => {
+              const currentGroups = storage.getProgramGroups(prog.id);
+              const isEditingThisProg = editingProgramGroupsId === prog.id;
+
+              return (
+                <div key={prog.id} className="p-5 rounded-2xl border border-slate-200 hover:border-orange-300 transition-all bg-slate-50/50 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-[#EA580C] bg-orange-100 px-2.5 py-1 rounded-lg">
+                      {prog.code}
+                    </span>
+                    <span className="text-[10px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full font-bold">
+                      Active
+                    </span>
+                  </div>
+
+                  <div>
+                    <h4 className="font-bold text-slate-900 text-sm">{prog.name}</h4>
+                    <p className="text-xs text-slate-500 mt-0.5">{prog.description}</p>
+                  </div>
+
+                  {/* Program Groups Section */}
+                  <div className="pt-2 border-t border-slate-200/70 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-700 flex items-center gap-1">
+                        <Users className="w-3.5 h-3.5 text-[#EA580C]" />
+                        <span>Classes & Groupes paramétrés :</span>
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (isEditingThisProg) {
+                            setEditingProgramGroupsId(null);
+                          } else {
+                            setEditingProgramGroupsId(prog.id);
+                            setCustomGroupInput('');
+                          }
+                        }}
+                        className="text-xs font-bold text-[#EA580C] hover:underline flex items-center gap-1 cursor-pointer"
+                      >
+                        {isEditingThisProg ? 'Terminer' : 'Gérer les groupes'}
+                      </button>
+                    </div>
+
+                    {/* Chips for existing groups */}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {currentGroups.map(grp => (
+                        <div
+                          key={grp}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-slate-200 shadow-2xs text-xs font-bold text-slate-800"
+                        >
+                          <span>Classe {grp}</span>
+                          {isEditingThisProg && currentGroups.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveGroupFromProgram(prog.id, grp)}
+                              className="text-slate-400 hover:text-rose-600 cursor-pointer"
+                              title={`Supprimer le groupe ${grp}`}
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Editor: Add group A, B, C, D... */}
+                    {isEditingThisProg && (
+                      <div className="mt-2 p-3 bg-white rounded-xl border border-orange-200 space-y-2 animate-in fade-in">
+                        <p className="text-[11px] text-slate-600 font-semibold">
+                          Ajouter un groupe ou classe à <strong className="text-slate-900">{prog.name}</strong> :
+                        </p>
+                        
+                        {/* Preset buttons for fast addition */}
+                        <div className="flex flex-wrap items-center gap-1">
+                          {['A', 'B', 'C', 'D', 'E'].map(quickLetter => {
+                            const alreadyHas = currentGroups.includes(quickLetter);
+                            return (
+                              <button
+                                key={quickLetter}
+                                type="button"
+                                disabled={alreadyHas}
+                                onClick={() => handleAddGroupToProgram(prog.id, quickLetter)}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer transition-all ${
+                                  alreadyHas
+                                    ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                                    : 'bg-orange-50 text-[#EA580C] hover:bg-[#EA580C] hover:text-white border border-orange-200'
+                                }`}
+                              >
+                                + Groupe {quickLetter}
+                              </button>
+                            );
+                          })}
+                        </div>
+
+                        {/* Custom input */}
+                        <div className="flex items-center gap-2 pt-1">
+                          <input
+                            type="text"
+                            maxLength={10}
+                            placeholder="Autre lettre/intitulé (ex: F, Soir...)"
+                            value={customGroupInput}
+                            onChange={e => setCustomGroupInput(e.target.value)}
+                            className="flex-1 px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg font-bold"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleAddGroupToProgram(prog.id, customGroupInput)}
+                            className="px-3 py-1.5 bg-[#EA580C] hover:bg-[#D94600] text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                          >
+                            Ajouter
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: MATIÈRES */}
+      {activeTab === 'subjects' && (
+        <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-base font-bold text-slate-900">Catalogue des matières enseignées</h3>
+              <p className="text-xs text-slate-500">Assignation aux filières et enseignants responsables</p>
+            </div>
+            <button
+              onClick={() => setIsAddingSubject(!isAddingSubject)}
+              className="px-4 py-2 rounded-xl bg-[#EA580C] text-white font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>{isAddingSubject ? 'Fermer' : 'Nouvelle matière'}</span>
+            </button>
+          </div>
+
+          {isAddingSubject && (
+            <form onSubmit={handleCreateSubject} className="p-4 bg-orange-50/60 rounded-xl border border-orange-200 space-y-3 animate-in fade-in">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <input
+                  type="text"
+                  required
+                  placeholder="Intitulé de la matière (ex: Génie Parasismique)"
+                  value={newSubjectName}
+                  onChange={e => setNewSubjectName(e.target.value)}
+                  className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold"
+                />
+                <input
+                  type="text"
+                  required
+                  placeholder="Code matière (ex: GP305)"
+                  value={newSubjectCode}
+                  onChange={e => setNewSubjectCode(e.target.value)}
+                  className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold uppercase"
+                />
+                <input
+                  type="text"
+                  placeholder="Enseignant (ex: Dr. Houessou)"
+                  value={newSubjectTeacher}
+                  onChange={e => setNewSubjectTeacher(e.target.value)}
+                  className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <select
+                  value={newSubjectProgramId}
+                  onChange={e => setNewSubjectProgramId(e.target.value)}
+                  className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold"
+                >
+                  {programs.map(p => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+                <select
+                  value={newSubjectLevelId}
+                  onChange={e => setNewSubjectLevelId(e.target.value)}
+                  className="px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-bold"
+                >
+                  {levels.map(l => (
+                    <option key={l.id} value={l.id}>{l.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-[#EA580C] text-white text-xs font-bold rounded-xl"
+                >
+                  Ajouter la matière
+                </button>
+              </div>
+            </form>
+          )}
+
+          <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto">
+            {subjects.map(sub => {
+              const prog = programs.find(p => p.id === sub.programId);
+              const lvl = levels.find(l => l.id === sub.levelId);
+              return (
+                <div key={sub.id} className="py-3 flex items-center justify-between text-xs">
+                  <div>
+                    {sub.code && <span className="font-mono font-bold text-[#EA580C] mr-2">{sub.code}</span>}
+                    <strong className="text-slate-900 text-sm">{sub.name}</strong>
+                    <span className="text-slate-400 ml-2">Enseignant : {sub.teacherName || 'Non assigné'}</span>
+                  </div>
+                  <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-semibold">
+                    {prog?.code} • {lvl?.code}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: UTILISATEURS */}
+      {activeTab === 'users' && (
+        <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+          <h3 className="text-base font-bold text-slate-900">Personnel autorisé et gestion des rôles</h3>
+          <div className="divide-y divide-slate-100">
+            {users.map(u => (
+              <div key={u.id} className="py-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-slate-200 overflow-hidden">
+                    {u.avatarUrl && <img src={u.avatarUrl} alt={u.name} className="w-full h-full object-cover" />}
+                  </div>
+                  <div>
+                    <p className="font-bold text-sm text-slate-900">{u.name}</p>
+                    <p className="text-xs text-slate-500">{u.email}</p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">Dernière connexion: {u.lastLogin}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
+                    u.role === 'ADMIN' ? 'bg-slate-900 text-white' : 'bg-orange-100 text-[#EA580C]'
+                  }`}>
+                    {u.role}
+                  </span>
+                  <span className="text-xs text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded font-medium">
+                    Actif
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* TAB 5: ANNÉE ACADÉMIQUE */}
+      {activeTab === 'school-year' && (
+        <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+          <h3 className="text-base font-bold text-slate-900">Configuration de l&apos;année académique</h3>
+          <div className="p-5 rounded-2xl bg-emerald-50 border border-emerald-200 flex items-center justify-between">
+            <div>
+              <span className="text-xs font-bold text-emerald-800 uppercase tracking-wider">Année active</span>
+              <h4 className="text-2xl font-black text-slate-900 mt-0.5">{storage.getSchoolYear()?.name || '2026-2027'}</h4>
+              <p className="text-xs text-slate-600 mt-1">Période du 1er Septembre 2026 au 31 Juillet 2027</p>
+              <p className="text-[11px] text-slate-500 mt-1 italic">Cycle académique du Bénin : rentrée en septembre, clôture en juillet au plus tard, nouvelle année annoncée dès août.</p>
+            </div>
+            <span className="px-3 py-1 rounded-full bg-emerald-600 text-white text-xs font-bold">
+              En cours
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

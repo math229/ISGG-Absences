@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 700 480" width="100%" height="100%" fill="none">
+  <!-- DEFS -->
+  <defs>
+    <style>
+      .isgg-orange { fill: #EA580C; }
+      .isgg-black { fill: #0B0F19; }
+      .isgg-text {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        font-weight: 900;
+        text-anchor: middle;
+      }
+    </style>
+  </defs>
+
+  <g id="isgg-emblem">
+    <!-- LEFT WING - LAYER 1 (OUTER TOP) -->
+    <path d="M 270 95 C 220 50 180 45 130 50 C 122 51 118 57 122 63 C 145 105 180 145 235 185 L 255 170 C 210 135 175 100 155 75 C 190 70 230 75 270 95 Z" class="isgg-orange" />
+
+    <!-- LEFT WING - LAYER 2 (MIDDLE) -->
+    <path d="M 260 125 C 205 85 160 85 110 95 C 102 97 99 104 104 109 C 130 145 165 185 220 220 L 240 205 C 195 175 160 140 140 115 C 175 110 215 112 260 125 Z" class="isgg-orange" />
+
+    <!-- LEFT WING - LAYER 3 (INNER) -->
+    <path d="M 250 155 C 195 125 150 128 100 145 C 92 148 90 155 96 160 C 120 190 155 225 210 255 L 228 240 C 185 215 150 185 132 165 C 165 155 205 150 250 155 Z" class="isgg-orange" />
+
+    <!-- LEFT WING - BOTTOM BLACK FOUNDATION SWOOSH -->
+    <path d="M 95 195 C 90 197 88 205 92 210 C 120 245 170 278 240 295 L 245 275 C 185 260 145 230 118 200 C 135 200 160 205 185 215 L 195 200 C 160 190 125 190 95 195 Z" class="isgg-black" />
+
+    <!-- LEFT CENTER SPINE TAIL -->
+    <path d="M 268 285 C 272 325 268 360 258 385 C 255 390 262 392 264 386 C 275 355 285 315 280 282 Z" class="isgg-orange" />
+
+
+    <!-- RIGHT WING - LAYER 1 (OUTER TOP) -->
+    <path d="M 430 95 C 480 50 520 45 570 50 C 578 51 582 57 578 63 C 555 105 520 145 465 185 L 445 170 C 490 135 525 100 545 75 C 510 70 470 75 430 95 Z" class="isgg-orange" />
+
+    <!-- RIGHT WING - LAYER 2 (MIDDLE) -->
+    <path d="M 440 125 C 495 85 540 85 590 95 C 598 97 601 104 596 109 C 570 145 535 185 480 220 L 460 205 C 505 175 540 140 560 115 C 525 110 485 112 440 125 Z" class="isgg-orange" />
+
+    <!-- RIGHT WING - LAYER 3 (INNER) -->
+    <path d="M 450 155 C 505 125 550 128 600 145 C 608 148 610 155 604 160 C 580 190 545 225 490 255 L 472 240 C 515 215 550 185 568 165 C 535 155 495 150 450 155 Z" class="isgg-orange" />
+
+    <!-- RIGHT WING - BOTTOM BLACK FOUNDATION SWOOSH -->
+    <path d="M 605 195 C 610 197 612 205 608 210 C 580 245 530 278 460 295 L 455 275 C 515 260 555 230 582 200 C 565 200 540 205 515 215 L 505 200 C 540 190 575 190 605 195 Z" class="isgg-black" />
+
+    <!-- RIGHT CENTER SPINE TAIL -->
+    <path d="M 432 285 C 428 325 432 360 442 385 C 445 390 438 392 436 386 C 425 355 415 315 420 282 Z" class="isgg-orange" />
+
+    <!-- CENTER MONOGRAM (I, S on top, G, G below) -->
+    <g id="center-monogram" transform="translate(290, 100)">
+      <!-- LETTER 'I' (Orange) -->
+      <rect x="12" y="5" width="28" height="85" rx="3" class="isgg-orange" />
+
+      <!-- LETTER 'S' (Black) -->
+      <path d="M 65 25 C 65 12 75 5 95 5 C 115 5 125 14 125 27 C 125 40 115 45 98 50 C 78 55 65 60 65 72 C 65 85 76 92 96 92 C 118 92 128 82 128 68 L 105 68 C 105 73 102 76 96 76 C 90 76 86 73 86 68 C 86 62 92 59 105 55 C 124 50 145 42 145 25 C 145 10 128 -2 95 -2 C 65 -2 45 10 45 28 L 65 28 Z" class="isgg-black" transform="translate(0, 0)" />
+
+      <!-- LETTER 'G' (Left, Black) -->
+      <path d="M 55 105 C 25 105 0 128 0 158 C 0 188 25 210 58 210 C 88 210 110 192 110 162 L 110 150 L 58 150 L 58 168 L 88 168 C 88 180 75 192 56 192 C 38 192 24 178 24 158 C 24 138 38 123 56 123 C 72 123 83 132 86 142 L 108 138 C 102 118 82 105 55 105 Z" class="isgg-black" transform="translate(0, 5)" />
+
+      <!-- LETTER 'G' (Right, Orange) -->
+      <path d="M 175 105 C 145 105 120 128 120 158 C 120 188 145 210 178 210 C 208 210 230 192 230 162 L 230 150 L 178 150 L 178 168 L 208 168 C 208 180 195 192 176 192 C 158 192 144 178 144 158 C 144 138 158 123 176 123 C 192 123 203 132 206 142 L 228 138 C 222 118 202 105 175 105 Z" class="isgg-orange" transform="translate(-60, 5)" />
+    </g>
+  </g>
+
+  <!-- TEXT BELOW EMBLEM -->
+  <text x="350" y="425" class="isgg-black isgg-text" font-size="27" letter-spacing="3.5">
+    INSTITUT SUPÉRIEUR DE
+  </text>
+  <text x="350" y="462" class="isgg-black isgg-text" font-size="29" letter-spacing="2">
+    GÉNIE CIVIL ET DE GESTION
+  </text>
+</svg>
