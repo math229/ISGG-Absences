@@ -42,6 +42,7 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    storage.logout();
     setCurrentUser(null);
   };
 

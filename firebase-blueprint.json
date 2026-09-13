@@ -87,9 +87,30 @@
         "activeSchoolYear": { "type": "object" },
         "updatedAt": { "type": "string" }
       }
+    },
+    "isgg_users": {
+      "title": "ISGG Users",
+      "description": "Surveillants and Administrative Directors",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string" },
+        "title": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "lastLogin": { "type": "string" }
+      },
+      "required": ["id", "name", "email", "role"]
     }
   },
   "firestore": {
+    "isgg_users": {
+      "rules": {
+        "read": "true",
+        "write": "true"
+      }
+    },
     "isgg_absences": {
       "rules": {
         "read": "true",

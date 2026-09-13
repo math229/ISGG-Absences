@@ -1,4 +1,4 @@
-import { Program, Level, Subject, Student, SchoolYear, User } from '../types';
+import { Program, Level, Subject, Student, SchoolYear, User, SecurityCodes } from '../types';
 
 export const INITIAL_SCHOOL_YEAR: SchoolYear = {
   id: 'sy-2026-2027',
@@ -8,6 +8,12 @@ export const INITIAL_SCHOOL_YEAR: SchoolYear = {
   isActive: true,
 };
 
+export const DEFAULT_SECURITY_CODES: SecurityCodes = {
+  surveillantCode: 'ISGG-SURV-2026',
+  directorCode: 'ISGG-DIR-9482',
+  updatedAt: new Date().toISOString(),
+};
+
 export const INITIAL_USERS: User[] = [
   {
     id: 'usr-surveillant-1',
@@ -15,6 +21,8 @@ export const INITIAL_USERS: User[] = [
     email: 'm.diallo@isgg-edu.com',
     role: 'SURVEILLANT',
     title: 'Surveillant général',
+    password: 'password123',
+    isActive: true,
     avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
     lastLogin: 'Aujourd\'hui à 07:45',
   },
@@ -24,6 +32,8 @@ export const INITIAL_USERS: User[] = [
     email: 'direction@isgg-edu.com',
     role: 'ADMIN',
     title: 'Directeur des études & Administrateur',
+    password: 'password123',
+    isActive: true,
     avatarUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
     lastLogin: 'Aujourd\'hui à 08:10',
   },

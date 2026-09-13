@@ -5,7 +5,7 @@ import {
   Shield, 
   UserCheck, 
   LogOut, 
-  RotateCcw, 
+  Settings, 
   Calendar,
   CheckCircle2,
   AlertTriangle,
@@ -82,19 +82,6 @@ export const Header: React.FC<HeaderProps> = ({
   }, [notificationsOpen, userMenuOpen]);
 
   const unreadCount = notifications.filter(n => !n.read).length;
-
-  const handleRoleToggle = (role: 'SURVEILLANT' | 'ADMIN') => {
-    storage.switchRole(role);
-    setUserMenuOpen(false);
-  };
-
-  const handleResetData = () => {
-    if (window.confirm('Voulez-vous réinitialiser les données de démonstration à leur état initial ?')) {
-      storage.resetToDefaultSeed();
-      setUserMenuOpen(false);
-      window.location.reload();
-    }
-  };
 
   const markAllAsRead = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -344,52 +331,17 @@ export const Header: React.FC<HeaderProps> = ({
                 </div>
               </div>
 
-              {/* Role switcher for convenient evaluation */}
-              <div className="px-3 py-2 border-b border-slate-100">
-                <p className="text-[10px] font-bold uppercase text-slate-400 mb-1.5 px-1">
-                  Changer de profil (Test Rôles)
-                </p>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <button
-                    onClick={() => handleRoleToggle('SURVEILLANT')}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-colors ${
-                      currentUser.role === 'SURVEILLANT'
-                        ? 'bg-[#EA580C] text-white shadow-xs'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                    }`}
-                  >
-                    <UserCheck className="w-3 h-3" /> Surveillant
-                  </button>
-                  <button
-                    onClick={() => handleRoleToggle('ADMIN')}
-                    className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-1 transition-colors ${
-                      currentUser.role === 'ADMIN'
-                        ? 'bg-slate-900 text-white shadow-xs'
-                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                    }`}
-                  >
-                    <Shield className="w-3 h-3" /> Admin
-                  </button>
-                </div>
-              </div>
-
-              {/* Utility actions */}
+              {/* Actions du compte */}
               <div className="py-1">
                 <button
                   onClick={() => {
                     setUserMenuOpen(false);
                     onNavigate('settings');
                   }}
-                  className="w-full text-left px-4 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                  className="w-full text-left px-4 py-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50 hover:text-slate-900 flex items-center gap-2.5 transition-colors cursor-pointer"
                 >
-                  Paramètres de l&apos;application
-                </button>
-                <button
-                  onClick={handleResetData}
-                  className="w-full text-left px-4 py-2 text-xs font-medium text-amber-700 hover:bg-amber-50 flex items-center gap-2"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  Réinitialiser les données démo
+                  <Settings className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Paramètres de l&apos;application</span>
                 </button>
               </div>
 

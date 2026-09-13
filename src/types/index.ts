@@ -7,7 +7,16 @@ export interface User {
   role: UserRole;
   avatarUrl?: string;
   title: string;
+  password?: string;
+  isActive?: boolean;
+  emailVerified?: boolean;
   lastLogin?: string;
+}
+
+export interface SecurityCodes {
+  surveillantCode: string;
+  directorCode: string;
+  updatedAt?: string;
 }
 
 export interface Program {

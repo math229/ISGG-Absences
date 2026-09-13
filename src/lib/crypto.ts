@@ -1,0 +1,206 @@
+/**
+ * ISGG Security & Cryptographic Engine
+ * - Password Strength Validator (Majuscule, Minuscule, Chiffre, Symbole, Min 8 chars)
+ * - Salted Hash for Passwords (SHA-256 via Web Crypto API)
+ * - AES-GCM 256-bit Encryption for Sensitive Data in Firestore & Local Storage
+ */
+
+export interface PasswordStrengthResult {
+  isValid: boolean;
+  score: number; // 0 à 4
+  hasLength: boolean;
+  hasUpper: boolean;
+  hasLower: boolean;
+  hasNumber: boolean;
+  hasSymbol: boolean;
+  message?: string;
+}
+
+export const PASSWORD_RULES = {
+  minLength: 8,
+  hasUpper: /[A-Z]/,
+  hasLower: /[a-z]/,
+  hasNumber: /[0-9]/,
+  hasSymbol: /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>/?`~]/,
+};
+
+export function validatePasswordStrength(pwd: string): PasswordStrengthResult {
+  const hasLength = (pwd || '').length >= PASSWORD_RULES.minLength;
+  const hasUpper = PASSWORD_RULES.hasUpper.test(pwd || '');
+  const hasLower = PASSWORD_RULES.hasLower.test(pwd || '');
+  const hasNumber = PASSWORD_RULES.hasNumber.test(pwd || '');
+  const hasSymbol = PASSWORD_RULES.hasSymbol.test(pwd || '');
+
+  let score = 0;
+  if (hasLength) score++;
+  if (hasUpper && hasLower) score++;
+  if (hasNumber) score++;
+  if (hasSymbol) score++;
+
+  const isValid = hasLength && hasUpper && hasLower && hasNumber && hasSymbol;
+
+  let message: string | undefined;
+  if (!isValid) {
+    const missing: string[] = [];
+    if (!hasLength) missing.push('au moins 8 caractères');
+    if (!hasUpper) missing.push('une lettre majuscule');
+    if (!hasLower) missing.push('une lettre minuscule');
+    if (!hasNumber) missing.push('un chiffre');
+    if (!hasSymbol) missing.push('un symbole (!@#$%...)');
+    message = `Le mot de passe doit comporter : ${missing.join(', ')}.`;
+  }
+
+  return {
+    isValid,
+    score,
+    hasLength,
+    hasUpper,
+    hasLower,
+    hasNumber,
+    hasSymbol,
+    message,
+  };
+}
+
+/**
+ * Hachage salé irréversible SHA-256 pour les mots de passe
+ */
+const SALT_STATIC = 'ISGG_SECURE_SALT_v1_2026_BENIN_STUDIES';
+
+export async function hashPassword(plainText: string, salt: string = SALT_STATIC): Promise<string> {
+  if (!plainText) return '';
+  const textToHash = `${salt}:${plainText}:${salt}`;
+  
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    const msgBuffer = new TextEncoder().encode(textToHash);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return 'sha256$' + hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  // Fallback synchrone déterministe si Web Crypto est indisponible
+  let hash = 0;
+  for (let i = 0; i < textToHash.length; i++) {
+    const char = textToHash.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash |= 0;
+  }
+  return 'legacy$' + Math.abs(hash).toString(16);
+}
+
+/**
+ * Vérifie un mot de passe contre un hash existant
+ * (Supporte aussi les anciens mots de passe en clair pour rétrocompatibilité lors de la première migration)
+ */
+export async function verifyPassword(plainText: string, storedHashOrPlain: string): Promise<boolean> {
+  if (!plainText || !storedHashOrPlain) return false;
+
+  // Si c'est déjà un hashé sha256
+  if (storedHashOrPlain.startsWith('sha256$') || storedHashOrPlain.startsWith('legacy$')) {
+    const computed = await hashPassword(plainText);
+    return computed === storedHashOrPlain;
+  }
+
+  // Si ancien mot de passe non encore haché (ex: 'password123')
+  return plainText === storedHashOrPlain;
+}
+
+/**
+ * Clé maîtresse de dérivation pour le chiffrement symétrique AES-GCM
+ */
+const ISGG_SECRET_PASSPHRASE = 'ISGG_INSTITUTIONAL_AES_GCM_ENCRYPTION_KEY_SECRET_STUDIES_2026';
+
+async function deriveKey(): Promise<CryptoKey | null> {
+  if (typeof crypto === 'undefined' || !crypto.subtle) return null;
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    'raw',
+    enc.encode(ISGG_SECRET_PASSPHRASE),
+    { name: 'PBKDF2' },
+    false,
+    ['deriveKey']
+  );
+  return crypto.subtle.deriveKey(
+    {
+      name: 'PBKDF2',
+      salt: enc.encode('ISGG_AES_SALT_2026'),
+      iterations: 10000,
+      hash: 'SHA-256',
+    },
+    keyMaterial,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
+/**
+ * Chiffrement symétrique strict AES-GCM 256 bits
+ * Produit un token au format: `enc:v1:<iv_hex>:<ciphertext_hex>`
+ */
+export async function encryptSensitiveData(plainText: string): Promise<string> {
+  if (!plainText) return plainText;
+  try {
+    const key = await deriveKey();
+    if (!key || typeof crypto === 'undefined') {
+      // Fallback obfuscation Base64 si Web Crypto indisponible
+      return 'b64:' + btoa(encodeURIComponent(plainText));
+    }
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const encoded = new TextEncoder().encode(plainText);
+    const cipherBuffer = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      key,
+      encoded
+    );
+    const ivHex = Array.from(iv).map(b => b.toString(16).padStart(2, '0')).join('');
+    const cipherHex = Array.from(new Uint8Array(cipherBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+    return `enc:v1:${ivHex}:${cipherHex}`;
+  } catch (err) {
+    console.warn('Erreur lors du chiffrement des données:', err);
+    return plainText;
+  }
+}
+
+/**
+ * Déchiffrement symétrique strict AES-GCM 256 bits
+ */
+export async function decryptSensitiveData(encryptedText: string): Promise<string> {
+  if (!encryptedText) return encryptedText;
+
+  if (encryptedText.startsWith('b64:')) {
+    try {
+      return decodeURIComponent(atob(encryptedText.substring(4)));
+    } catch {
+      return encryptedText;
+    }
+  }
+
+  if (!encryptedText.startsWith('enc:v1:')) {
+    // Ce n'était pas une donnée chiffrée
+    return encryptedText;
+  }
+
+  try {
+    const parts = encryptedText.split(':');
+    if (parts.length !== 4) return encryptedText;
+    const ivHex = parts[2];
+    const cipherHex = parts[3];
+
+    const iv = new Uint8Array(ivHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+    const cipherBuffer = new Uint8Array(cipherHex.match(/.{1,2}/g)!.map(byte => parseInt(byte, 16)));
+
+    const key = await deriveKey();
+    if (!key) return encryptedText;
+
+    const decryptedBuffer = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv },
+      key,
+      cipherBuffer
+    );
+    return new TextDecoder().decode(decryptedBuffer);
+  } catch (err) {
+    console.warn('Impossible de déchiffrer la chaîne:', err);
+    return encryptedText;
+  }
+}

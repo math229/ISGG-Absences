@@ -43,7 +43,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isOpenMobile = false,
   onCloseMobile,
 }) => {
-  const [currentUser, setCurrentUser] = useState<User>(storage.getCurrentUser());
+  const [currentUser, setCurrentUser] = useState<User | null>(storage.getCurrentUser());
   const schoolYear = storage.getSchoolYear();
 
   useEffect(() => {
@@ -53,6 +53,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }, []);
 
   const handleRoleToggle = () => {
+    if (!currentUser) return;
     const newRole = currentUser.role === 'ADMIN' ? 'SURVEILLANT' : 'ADMIN';
     storage.switchRole(newRole);
   };
@@ -211,41 +212,43 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </div>
 
               {/* Mobile Profile Card with Quick Role Switch */}
-              <div className="p-4 bg-gradient-to-b from-[#0F172A] to-slate-900/60 border-b border-slate-800/60">
-                <div className="flex items-center gap-3">
-                  <div className="w-11 h-11 rounded-full overflow-hidden border-2 border-[#EA580C] bg-slate-800 flex-shrink-0 flex items-center justify-center font-bold text-white shadow-md">
-                    {currentUser.avatarUrl ? (
-                      <img src={currentUser.avatarUrl} alt={currentUser.name} className="w-full h-full object-cover" />
-                    ) : (
-                      currentUser.name.slice(0, 2).toUpperCase()
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-bold text-white truncate">{currentUser.name}</p>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      {currentUser.role === 'ADMIN' ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                          <Shield className="w-2.5 h-2.5" /> Administrateur
-                        </span>
+              {currentUser && (
+                <div className="p-4 bg-gradient-to-b from-[#0F172A] to-slate-900/60 border-b border-slate-800/60">
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-full overflow-hidden border-2 border-[#EA580C] bg-slate-800 flex-shrink-0 flex items-center justify-center font-bold text-white shadow-md">
+                      {currentUser.avatarUrl ? (
+                        <img src={currentUser.avatarUrl} alt={currentUser.name} className="w-full h-full object-cover" />
                       ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-orange-500/20 text-[#F97316] border border-orange-500/30">
-                          <UserCheck className="w-2.5 h-2.5" /> Surveillant
-                        </span>
+                        currentUser.name.slice(0, 2).toUpperCase()
                       )}
                     </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-white truncate">{currentUser.name}</p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        {currentUser.role === 'ADMIN' ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                            <Shield className="w-2.5 h-2.5" /> Administrateur
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-orange-500/20 text-[#F97316] border border-orange-500/30">
+                            <UserCheck className="w-2.5 h-2.5" /> Surveillant
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
 
-                {/* Quick Role Switcher */}
-                <button
-                  type="button"
-                  onClick={handleRoleToggle}
-                  className="mt-3 w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/60 text-xs font-semibold text-slate-300 hover:text-white transition-colors cursor-pointer"
-                >
-                  <ArrowRightLeft className="w-3.5 h-3.5 text-[#EA580C]" />
-                  <span>Basculer en mode {currentUser.role === 'ADMIN' ? 'Surveillant' : 'Directeur / Admin'}</span>
-                </button>
-              </div>
+                  {/* Quick Role Switcher */}
+                  <button
+                    type="button"
+                    onClick={handleRoleToggle}
+                    className="mt-3 w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/60 text-xs font-semibold text-slate-300 hover:text-white transition-colors cursor-pointer"
+                  >
+                    <ArrowRightLeft className="w-3.5 h-3.5 text-[#EA580C]" />
+                    <span>Basculer en mode {currentUser.role === 'ADMIN' ? 'Surveillant' : 'Directeur / Admin'}</span>
+                  </button>
+                </div>
+              )}
 
               {/* High-Impact Action: Nouvelle absence button */}
               <div className="p-3">

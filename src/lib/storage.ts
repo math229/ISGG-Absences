@@ -11,6 +11,7 @@ import {
   DashboardMetrics,
   SheetImportRecord,
   NotificationItem,
+  SecurityCodes,
 } from '../types';
 import {
   INITIAL_USERS,
@@ -19,6 +20,7 @@ import {
   INITIAL_SUBJECTS,
   INITIAL_STUDENTS,
   INITIAL_SCHOOL_YEAR,
+  DEFAULT_SECURITY_CODES,
 } from './constants';
 import { db } from './firebase';
 import {
@@ -29,6 +31,15 @@ import {
   onSnapshot,
   writeBatch,
 } from 'firebase/firestore';
+import { 
+  hashPassword, 
+  verifyPassword, 
+  encryptSensitiveData, 
+  decryptSensitiveData,
+  validatePasswordStrength 
+} from './crypto';
+import { rateLimiter } from './rateLimiter';
+import { emailOtpService } from './emailOtpService';
 
 export type SyncStatus = 'connected' | 'syncing' | 'offline' | 'error';
 
@@ -43,6 +54,7 @@ const STORAGE_KEYS = {
   SCHOOL_YEAR: 'isgg_school_year',
   SHEET_IMPORTS: 'isgg_sheet_imports',
   NOTIFICATIONS: 'isgg_notifications',
+  SECURITY_CODES: 'isgg_security_codes',
 };
 
 // Accent folding helper
@@ -263,7 +275,7 @@ const INITIAL_NOTIFICATIONS: NotificationItem[] = [
 ];
 
 class StorageService {
-  private currentUser: User = INITIAL_USERS[0];
+  private currentUser: User | null = null;
   private users: User[] = INITIAL_USERS;
   private programs: Program[] = INITIAL_PROGRAMS;
   private levels: Level[] = INITIAL_LEVELS;
@@ -273,6 +285,7 @@ class StorageService {
   private schoolYear: SchoolYear = INITIAL_SCHOOL_YEAR;
   private sheetImports: SheetImportRecord[] = [];
   private notifications: NotificationItem[] = [];
+  private securityCodes: SecurityCodes = DEFAULT_SECURITY_CODES;
   private listeners: Set<() => void> = new Set();
   private syncStatus: SyncStatus = 'syncing';
   private firestoreInitialized = false;
@@ -295,8 +308,34 @@ class StorageService {
     if (typeof window === 'undefined') return;
 
     try {
+      const savedCodes = localStorage.getItem(STORAGE_KEYS.SECURITY_CODES);
+      if (savedCodes) {
+        try {
+          const parsed = JSON.parse(savedCodes);
+          this.securityCodes = {
+            ...DEFAULT_SECURITY_CODES,
+            ...parsed,
+          };
+          if (this.securityCodes.directorCode === 'ISGG-DIR-ADMIN-2026' || !this.securityCodes.directorCode) {
+            this.securityCodes.directorCode = 'ISGG-DIR-9482';
+          }
+        } catch {
+          this.securityCodes = DEFAULT_SECURITY_CODES;
+        }
+      } else {
+        this.securityCodes = DEFAULT_SECURITY_CODES;
+      }
+
       const savedUser = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
-      if (savedUser) this.currentUser = JSON.parse(savedUser);
+      if (savedUser) {
+        try {
+          this.currentUser = JSON.parse(savedUser);
+        } catch {
+          this.currentUser = null;
+        }
+      } else {
+        this.currentUser = null;
+      }
 
       const savedUsers = localStorage.getItem(STORAGE_KEYS.USERS);
       if (savedUsers) this.users = JSON.parse(savedUsers);
@@ -550,6 +589,49 @@ class StorageService {
         () => {}
       );
 
+      // 4. Listen to Cloud Users
+      const usersCol = collection(db, 'isgg_users');
+      onSnapshot(
+        usersCol,
+        (snapshot) => {
+          if (!snapshot.empty) {
+            const remoteUsers: User[] = [];
+            snapshot.forEach((docSnap) => {
+              remoteUsers.push(docSnap.data() as User);
+            });
+            const userMap = new Map<string, User>();
+            this.users.forEach((u) => userMap.set(u.id, u));
+            remoteUsers.forEach((u) => userMap.set(u.id, u));
+            this.users = Array.from(userMap.values());
+            this.persistUsers();
+            this.notify();
+          }
+        },
+        (err) => {
+          console.warn('Firestore users sync notice:', err);
+        }
+      );
+
+      // 5. Listen to Security Codes
+      const secDocRef = doc(db, 'isgg_metadata', 'security_codes');
+      onSnapshot(
+        secDocRef,
+        (docSnap) => {
+          if (docSnap.exists()) {
+            this.securityCodes = docSnap.data() as SecurityCodes;
+            if (typeof window !== 'undefined') {
+              localStorage.setItem(STORAGE_KEYS.SECURITY_CODES, JSON.stringify(this.securityCodes));
+            }
+            this.notify();
+          } else {
+            setDoc(secDocRef, this.securityCodes, { merge: true }).catch(() => {});
+          }
+        },
+        (err) => {
+          console.warn('Firestore security_codes sync notice:', err);
+        }
+      );
+
       // Online / Offline window events
       if (typeof window !== 'undefined') {
         window.addEventListener('online', () => {
@@ -696,21 +778,507 @@ class StorageService {
   }
 
   // Getters
-  public getCurrentUser(): User {
+  public getCurrentUser(): User | null {
     return this.currentUser;
   }
 
-  public setCurrentUser(user: User): void {
+  public setCurrentUser(user: User | null): void {
     this.currentUser = user;
     if (typeof window !== 'undefined') {
-      localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
+      if (user) {
+        localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
+      } else {
+        localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      }
     }
     this.notify();
   }
 
+  public logout(): void {
+    this.setCurrentUser(null);
+  }
+
+  public persistUsers(): void {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(this.users));
+    }
+  }
+
+  public async syncUserToCloud(user: User): Promise<void> {
+    try {
+      // Pour Firestore, les données sensibles sont chiffrées au repos
+      const userPayload: Record<string, any> = {
+        ...user,
+      };
+
+      // Si le mot de passe est en clair, on s'assure qu'il est haché avant l'écriture dans Firestore
+      if (userPayload.password && !userPayload.password.startsWith('sha256$') && !userPayload.password.startsWith('legacy$')) {
+        userPayload.password = await hashPassword(userPayload.password);
+      }
+
+      // Chiffrement strict des champs personnels d'identification dans Firestore
+      if (userPayload.email) {
+        userPayload.emailEncrypted = await encryptSensitiveData(userPayload.email);
+      }
+      if (userPayload.name) {
+        userPayload.nameEncrypted = await encryptSensitiveData(userPayload.name);
+      }
+
+      const docRef = doc(db, 'isgg_users', user.id);
+      await setDoc(docRef, userPayload, { merge: true });
+    } catch (err) {
+      console.warn('Firestore syncUserToCloud error:', err);
+    }
+  }
+
+  public validateInstitutionalCode(role: import('../types').UserRole, authCode: string): boolean {
+    const normalizeKey = (k: string) => (k || '').trim().toUpperCase().replace(/[\s\-_]/g, '');
+    const enteredNorm = normalizeKey(authCode);
+    if (!enteredNorm) return false;
+
+    if (role === 'ADMIN') {
+      const allowedAdminKeys = [
+        normalizeKey(this.securityCodes?.directorCode || ''),
+        normalizeKey('ISGG-DIR-9482'),
+        normalizeKey('ISGG-DIR-ADMIN-2026'),
+        normalizeKey(DEFAULT_SECURITY_CODES.directorCode),
+      ].filter(Boolean);
+      return allowedAdminKeys.includes(enteredNorm);
+    } else {
+      const allowedSurvKeys = [
+        normalizeKey(this.securityCodes?.surveillantCode || ''),
+        normalizeKey('ISGG-SURV-2026'),
+        normalizeKey('ISGG-SURV-ADMIN-2026'),
+        normalizeKey(DEFAULT_SECURITY_CODES.surveillantCode),
+      ].filter(Boolean);
+      return allowedSurvKeys.includes(enteredNorm);
+    }
+  }
+
+  /**
+   * Étape 1 de création de compte : validation stricte et expédition de code OTP à l'email
+   */
+  public async initiateRegistration(data: {
+    name: string;
+    email: string;
+    role: import('../types').UserRole;
+    title?: string;
+    password?: string;
+    authCode: string;
+  }): Promise<{
+    success: boolean;
+    message: string;
+    lockedUntil?: number | null;
+    isBanned?: boolean;
+    delivered?: boolean;
+    warning?: string;
+    debugCode?: string;
+  }> {
+    const regContextKey = 'registration';
+    const rateState = await rateLimiter.getCloudState(regContextKey);
+
+    // Contrôle Bannissement permanent (> 100 échecs)
+    if (rateState.isBanned || rateLimiter.isClientBanned()) {
+      return {
+        success: false,
+        message: 'Accès strictement interdit : Cette adresse IP / poste a été banni suite à un nombre excessif de tentatives malveillantes (> 100 échecs). Veuillez contacter le secrétariat ISGG.',
+        isBanned: true,
+      };
+    }
+
+    // Contrôle Verrou temporaire de 5 minutes côté serveur
+    if (rateState.lockUntil && Date.now() < rateState.lockUntil) {
+      const remainingSec = Math.ceil((rateState.lockUntil - Date.now()) / 1000);
+      const minutes = Math.floor(remainingSec / 60);
+      const seconds = remainingSec % 60;
+      const formatted = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+      return {
+        success: false,
+        message: `Sécurité ISGG : 3 tentatives erronées consécutives. Inscription verrouillée pendant 5 minutes. Temps restant : ${formatted}.`,
+        lockedUntil: rateState.lockUntil,
+      };
+    }
+
+    // Validation complexité du mot de passe
+    if (data.password) {
+      const strength = validatePasswordStrength(data.password);
+      if (!strength.isValid) {
+        return {
+          success: false,
+          message: strength.message || 'Le mot de passe ne respecte pas les critères de sécurité requis (majuscule, minuscule, chiffre, symbole et min. 8 caractères).',
+        };
+      }
+    }
+
+    // Validation du code d'habilitation institutionnel
+    const isValidCode = this.validateInstitutionalCode(data.role, data.authCode);
+    if (!isValidCode) {
+      const failureState = await rateLimiter.recordFailure(
+        regContextKey,
+        `Échec du code d'habilitation pour rôle ${data.role}`
+      );
+
+      if (failureState.isBanned) {
+        return {
+          success: false,
+          message: 'Alerte de sécurité critique : Votre adresse IP a été définitivement bannie suite à plus de 100 tentatives échouées.',
+          isBanned: true,
+        };
+      }
+
+      if (failureState.lockUntil && Date.now() < failureState.lockUntil) {
+        return {
+          success: false,
+          message: 'Sécurité ISGG : 3 codes d\'habilitation erronés consécutifs. Vous devez patienter 5 minutes avant de pouvoir réessayer.',
+          lockedUntil: failureState.lockUntil,
+        };
+      }
+
+      const remainingAttempts = 3 - failureState.failureCount;
+      return { 
+        success: false, 
+        message: `Code d'habilitation incorrect pour le profil ${data.role === 'ADMIN' ? 'Directeur' : 'Surveillant'}. Plus que ${remainingAttempts} tentative${remainingAttempts > 1 ? 's' : ''} avant blocage de 5 minutes.` 
+      };
+    }
+
+    // Vérifier si l'adresse email est déjà utilisée
+    const emailClean = data.email.trim().toLowerCase();
+    const existing = this.users.find(u => u.email.trim().toLowerCase() === emailClean);
+    if (existing) {
+      return { success: false, message: 'Un compte avec cette adresse email existe déjà. Veuillez vous connecter.' };
+    }
+
+    // Envoi du code OTP par email réel (acheminé vers la boîte mail)
+    const emailResult = await emailOtpService.sendRegistrationOtp(emailClean, data.name, data.role);
+    if (!emailResult.success) {
+      return {
+        success: false,
+        message: emailResult.message,
+      };
+    }
+
+    return {
+      success: true,
+      message: emailResult.message,
+      delivered: emailResult.delivered,
+      warning: emailResult.warning,
+      debugCode: emailResult.debugCode,
+    };
+  }
+
+  /**
+   * Étape 2 de création de compte : validation du code OTP reçu par email et activation finale
+   */
+  public async completeRegistrationWithOtp(
+    data: {
+      name: string;
+      email: string;
+      role: import('../types').UserRole;
+      title?: string;
+      password?: string;
+      authCode: string;
+    },
+    enteredOtp: string
+  ): Promise<{ success: boolean; message: string; user?: User; lockedUntil?: number | null; isBanned?: boolean }> {
+    const regContextKey = 'registration';
+    const emailClean = data.email.trim().toLowerCase();
+
+    // Vérification du code OTP sur Firestore & cache local
+    const otpVerify = await emailOtpService.verifyRegistrationOtp(emailClean, enteredOtp);
+    if (!otpVerify.success) {
+      // N'appliquer le verrou serveur que si toutes les tentatives autorisées ont été épuisées
+      let lockedUntil: number | null = null;
+      let isBanned = false;
+      if (otpVerify.remainingAttempts === 0) {
+        const failureState = await rateLimiter.recordFailure(
+          regContextKey,
+          `Épuisement des tentatives OTP pour ${emailClean}`
+        );
+        lockedUntil = failureState.lockUntil;
+        isBanned = failureState.isBanned;
+      }
+      return {
+        success: false,
+        message: otpVerify.message,
+        lockedUntil,
+        isBanned,
+      };
+    }
+
+    // Réinitialisation du limiteur d'échecs après succès
+    await rateLimiter.recordSuccess(regContextKey);
+
+    const defaultTitle = data.role === 'ADMIN' ? 'Directeur / Administration' : 'Surveillant';
+    const roleTitle = data.title?.trim() || defaultTitle;
+    const hashedPassword = data.password ? await hashPassword(data.password) : '';
+
+    const newUser: User = {
+      id: `usr-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      name: data.name.trim(),
+      email: emailClean,
+      role: data.role,
+      title: roleTitle,
+      password: hashedPassword,
+      isActive: true,
+      emailVerified: true,
+      avatarUrl: `https://images.unsplash.com/photo-${data.role === 'ADMIN' ? '1472099645785-5658abf4ff4e' : '1535713875002-d1d0cf377fde'}?w=150&auto=format&fit=crop&q=80`,
+      lastLogin: 'Aujourd\'hui à ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    this.users.unshift(newUser);
+    this.persistUsers();
+    this.setCurrentUser(newUser);
+    await this.syncUserToCloud(newUser);
+    this.notify();
+
+    return { success: true, message: 'Adresse email vérifiée ! Compte activé avec succès.', user: newUser };
+  }
+
+  public async registerUser(data: {
+    name: string;
+    email: string;
+    role: import('../types').UserRole;
+    title?: string;
+    password?: string;
+    authCode: string;
+  }): Promise<{ success: boolean; message: string; user?: User; lockedUntil?: number | null; isBanned?: boolean }> {
+    // Méthode directe de repli
+    const initResult = await this.initiateRegistration(data);
+    if (!initResult.success) {
+      return initResult;
+    }
+    // Si un code est généré, complétion
+    return this.completeRegistrationWithOtp(data, initResult.debugCode || '');
+  }
+
+  /**
+   * Demande de réinitialisation de mot de passe par code OTP
+   */
+  public async requestPasswordResetOtp(email: string): Promise<{ success: boolean; message: string; user?: User; delivered?: boolean; warning?: string; debugCode?: string }> {
+    const cleanEmail = email.trim().toLowerCase();
+    const user = this.users.find(u => u.email.toLowerCase() === cleanEmail);
+    if (!user) {
+      return {
+        success: false,
+        message: 'Aucun compte enregistré avec cette adresse email. Veuillez vérifier votre saisie.',
+      };
+    }
+
+    const resetResult = await emailOtpService.sendPasswordResetOtp(cleanEmail);
+    if (!resetResult.success) {
+      return { success: false, message: resetResult.message };
+    }
+
+    return {
+      success: true,
+      message: resetResult.message,
+      user,
+      delivered: resetResult.delivered,
+      warning: resetResult.warning,
+      debugCode: resetResult.debugCode,
+    };
+  }
+
+  /**
+   * Validation de la réinitialisation de mot de passe avec code OTP et code d'habilitation
+   */
+  public async resetPasswordWithOtp(data: {
+    email: string;
+    otpCode: string;
+    authCode: string;
+    newPassword: string;
+  }): Promise<{ success: boolean; message: string }> {
+    const cleanEmail = data.email.trim().toLowerCase();
+    const user = this.users.find(u => u.email.toLowerCase() === cleanEmail);
+    if (!user) {
+      return { success: false, message: 'Compte introuvable.' };
+    }
+
+    // 1. Validation mot de passe
+    const strength = validatePasswordStrength(data.newPassword);
+    if (!strength.isValid) {
+      return { success: false, message: strength.message || 'Le nouveau mot de passe ne respecte pas les critères de sécurité.' };
+    }
+
+    // 2. Validation code d'habilitation
+    const isCodeValid = this.validateInstitutionalCode(user.role, data.authCode);
+    if (!isCodeValid) {
+      return { 
+        success: false, 
+        message: `Code d'habilitation incorrect pour votre profil ${user.role === 'ADMIN' ? 'Directeur' : 'Surveillant'}.` 
+      };
+    }
+
+    // 3. Validation OTP sur Firestore
+    const otpRes = await emailOtpService.verifyPasswordResetOtp(cleanEmail, data.otpCode);
+    if (!otpRes.success) {
+      return { success: false, message: otpRes.message };
+    }
+
+    // 4. Mise à jour du mot de passe
+    const hashedPassword = await hashPassword(data.newPassword);
+    user.password = hashedPassword;
+    this.persistUsers();
+    await this.syncUserToCloud(user);
+
+    // Débloque les éventuels verrous de connexion pour cet email
+    await rateLimiter.recordSuccess(`login_${cleanEmail}`);
+
+    return {
+      success: true,
+      message: 'Votre mot de passe a été réinitialisé avec succès ! Vous pouvez maintenant vous connecter.',
+    };
+  }
+
+  public async authenticateUser(identifier: string, password?: string): Promise<{
+    success: boolean;
+    message: string;
+    user?: User;
+    lockedUntil?: number | null;
+    isBanned?: boolean;
+  }> {
+    const cleanId = identifier.trim().toLowerCase();
+    const user = this.users.find(u =>
+      u.email.toLowerCase() === cleanId ||
+      u.name.toLowerCase() === cleanId
+    );
+
+    // Contexte de verrouillage basé sur l'identifiant saisi
+    const loginContextKey = `login_${cleanId || 'unknown'}`;
+    const rateState = await rateLimiter.getCloudState(loginContextKey);
+
+    // Contrôle Bannissement IP permanent
+    if (rateState.isBanned || rateLimiter.isClientBanned()) {
+      return {
+        success: false,
+        message: 'Accès strictement refusé : Votre adresse IP est bannie suite à des tentatives excessives (> 100 échecs).',
+        isBanned: true,
+      };
+    }
+
+    // Contrôle Verrou temporaire de 5 minutes côté serveur
+    if (rateState.lockUntil && Date.now() < rateState.lockUntil) {
+      const remainingSec = Math.ceil((rateState.lockUntil - Date.now()) / 1000);
+      const minutes = Math.floor(remainingSec / 60);
+      const seconds = remainingSec % 60;
+      const formatted = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+      return {
+        success: false,
+        message: `Compte temporairement verrouillé pour 5 minutes suite à 3 mots de passe erronés. Temps d'attente restant : ${formatted}.`,
+        lockedUntil: rateState.lockUntil,
+      };
+    }
+
+    if (!user) {
+      return { success: false, message: 'Identifiant ou adresse email introuvable. Veuillez vérifier ou créer un compte.' };
+    }
+
+    if (user.isActive === false) {
+      return { 
+        success: false, 
+        message: 'Ce compte utilisateur a été suspendu par la direction générale de l\'ISGG. Veuillez contacter le secrétariat administratif.' 
+      };
+    }
+
+    // Vérification cryptographique du mot de passe
+    if (user.password && password) {
+      const isPwdValid = await verifyPassword(password, user.password);
+      if (!isPwdValid) {
+        const failureState = await rateLimiter.recordFailure(
+          loginContextKey,
+          `Mot de passe erroné pour le compte ${user.email}`
+        );
+
+        if (failureState.isBanned) {
+          return {
+            success: false,
+            message: 'Alerte de sécurité critique : Votre adresse IP a été définitivement bannie suite à plus de 100 tentatives infructueuses.',
+            isBanned: true,
+          };
+        }
+
+        if (failureState.lockUntil && Date.now() < failureState.lockUntil) {
+          return {
+            success: false,
+            message: 'Sécurité ISGG : 3 mots de passe erronés consécutifs. Ce compte est verrouillé pour 5 minutes.',
+            lockedUntil: failureState.lockUntil,
+          };
+        }
+
+        const remaining = 3 - failureState.failureCount;
+        return { 
+          success: false, 
+          message: `Mot de passe incorrect. Il vous reste ${remaining} tentative${remaining > 1 ? 's' : ''} avant verrouillage de 5 minutes.` 
+        };
+      }
+    }
+
+    // Mot de passe correct -> Réinitialise les échecs consécutifs
+    await rateLimiter.recordSuccess(loginContextKey);
+
+    user.lastLogin = 'Aujourd\'hui à ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    this.setCurrentUser(user);
+    this.persistUsers();
+    await this.syncUserToCloud(user);
+
+    return { success: true, message: 'Connexion réussie', user };
+  }
+
+  public getSecurityCodes(): SecurityCodes {
+    return this.securityCodes;
+  }
+
+  public async updateSecurityCodes(codes: Partial<SecurityCodes>): Promise<{ success: boolean; message: string }> {
+    if (codes.surveillantCode !== undefined && codes.surveillantCode.trim().length < 4) {
+      return { success: false, message: 'Le code d\'habilitation Surveillant doit comporter au moins 4 caractères.' };
+    }
+    if (codes.directorCode !== undefined && codes.directorCode.trim().length < 6) {
+      return { success: false, message: 'Le code d\'habilitation Directeur doit comporter au moins 6 caractères.' };
+    }
+
+    this.securityCodes = {
+      ...this.securityCodes,
+      ...codes,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(STORAGE_KEYS.SECURITY_CODES, JSON.stringify(this.securityCodes));
+    }
+    this.notify();
+
+    try {
+      const secDocRef = doc(db, 'isgg_metadata', 'security_codes');
+      await setDoc(secDocRef, this.securityCodes, { merge: true });
+    } catch (err) {
+      console.warn('Firestore updateSecurityCodes error:', err);
+    }
+
+    return { success: true, message: 'Codes d\'habilitation mis à jour avec succès.' };
+  }
+
+  public toggleUserStatus(userId: string): { success: boolean; message: string; user?: User } {
+    const user = this.users.find(u => u.id === userId);
+    if (!user) return { success: false, message: 'Utilisateur introuvable.' };
+
+    const newStatus = user.isActive === false ? true : false;
+    user.isActive = newStatus;
+    this.persistUsers();
+    this.syncUserToCloud(user);
+    this.notify();
+
+    return { 
+      success: true, 
+      message: newStatus ? `Le compte de ${user.name} a été réactivé.` : `Le compte de ${user.name} a été suspendu.`, 
+      user 
+    };
+  }
+
   public switchRole(role: 'SURVEILLANT' | 'ADMIN'): void {
     const target = this.users.find(u => u.role === role) || this.users[0];
-    this.setCurrentUser(target);
+    if (target) {
+      this.setCurrentUser(target);
+    }
   }
 
   public getUsers(): User[] {
