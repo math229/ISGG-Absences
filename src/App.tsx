@@ -113,7 +113,7 @@ export default function App() {
             )}
 
             {currentView === 'reports' && (
-              <ReportsView />
+              <ReportsView onNavigateToStudent={handleViewStudent} />
             )}
 
             {currentView === 'settings' && (

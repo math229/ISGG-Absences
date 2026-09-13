@@ -1,6 +1,13 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, setLogLevel } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
+
+// Silence non-critical Firestore offline/retry connection notices
+try {
+  setLogLevel('error');
+} catch {
+  // Ignore if already configured
+}
 
 // Initialize Firebase App
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
@@ -11,3 +18,4 @@ export const db = firebaseConfig.firestoreDatabaseId
   : getFirestore(app);
 
 export default app;
+

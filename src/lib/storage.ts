@@ -173,6 +173,115 @@ function generateInitialAbsences(students: Student[], subjects: Subject[]): Abse
     });
   });
 
+  // Official ISGG Course Sessions Absences matching User Submitted Sheet (09/09/2026)
+  const ceo2Sub = subjects.find(s => s.id === 'sub-l2-communication-ecrite-2') || subjects[0];
+  const algSub = subjects.find(s => s.id === 'sub-l2-algebre-lineaire') || subjects[1] || subjects[0];
+
+  // Session 1: GI / SIL2_A | Matière: CEO II | 08h à 12h
+  const sil2A_Ceo2Students = [
+    'stu-aboki-job',
+    'stu-amossou-marcelin',
+    'stu-atioukpe-carlos',
+    'stu-bouraima-abdel',
+    'stu-chabi-isdeen',
+    'stu-doumatey-chimene',
+    'stu-ganni-loukman',
+    'stu-nata-jean-yves',
+  ];
+  sil2A_Ceo2Students.forEach((stuId, idx) => {
+    absences.push({
+      id: `abs-isgg-sil2a-ceo2-${idx + 1}`,
+      studentId: stuId,
+      subjectId: ceo2Sub.id,
+      schoolYearId: INITIAL_SCHOOL_YEAR.id,
+      recordedBy: 'M. Nicaise AÏZOUN',
+      absenceDate: '2026-09-09',
+      absenceTime: '08:00',
+      startTime: '08:00',
+      endTime: '12:00',
+      timeRange: '08h à 12h',
+      className: 'GI / SIL2_A',
+      observations: 'Sans motif',
+      createdAt: `2026-09-09T08:00:00Z`,
+    });
+  });
+
+  // Session 2: GI / SIL2_B | Matière: CEO II | 08h à 12h
+  const sil2B_Ceo2Students = [
+    'stu-acakpo-andre',
+    'stu-bode-stephane',
+    'stu-gnanguenon-gloria',
+    'stu-oladeyo-koudjibou',
+    'stu-sero-tikande',
+    'stu-sidi-delphin',
+  ];
+  sil2B_Ceo2Students.forEach((stuId, idx) => {
+    absences.push({
+      id: `abs-isgg-sil2b-ceo2-${idx + 1}`,
+      studentId: stuId,
+      subjectId: ceo2Sub.id,
+      schoolYearId: INITIAL_SCHOOL_YEAR.id,
+      recordedBy: 'M. Nicaise AÏZOUN',
+      absenceDate: '2026-09-09',
+      absenceTime: '08:00',
+      startTime: '08:00',
+      endTime: '12:00',
+      timeRange: '08h à 12h',
+      className: 'GI / SIL2_B',
+      observations: 'Sans motif',
+      createdAt: `2026-09-09T08:00:00Z`,
+    });
+  });
+
+  // Session 3: GI / SIL2_A | Matière: Algèbre linéaire | 13h à 17h
+  const sil2A_AlgStudents = [
+    'stu-aboki-job',
+    'stu-amossou-marcelin',
+    'stu-atioukpe-carlos',
+    'stu-bouraima-abdel',
+  ];
+  sil2A_AlgStudents.forEach((stuId, idx) => {
+    absences.push({
+      id: `abs-isgg-sil2a-alg-${idx + 1}`,
+      studentId: stuId,
+      subjectId: algSub.id,
+      schoolYearId: INITIAL_SCHOOL_YEAR.id,
+      recordedBy: 'M. Nicaise AÏZOUN',
+      absenceDate: '2026-09-09',
+      absenceTime: '13:00',
+      startTime: '13:00',
+      endTime: '17:00',
+      timeRange: '13h à 17h',
+      className: 'GI / SIL2_A',
+      observations: 'Sans motif',
+      createdAt: `2026-09-09T13:00:00Z`,
+    });
+  });
+
+  // Session 4: GI / SIL2_B | Matière: Algèbre linéaire | 13h à 17h
+  const sil2B_AlgStudents = [
+    'stu-acakpo-andre',
+    'stu-bode-stephane',
+    'stu-gnanguenon-gloria',
+  ];
+  sil2B_AlgStudents.forEach((stuId, idx) => {
+    absences.push({
+      id: `abs-isgg-sil2b-alg-${idx + 1}`,
+      studentId: stuId,
+      subjectId: algSub.id,
+      schoolYearId: INITIAL_SCHOOL_YEAR.id,
+      recordedBy: 'M. Nicaise AÏZOUN',
+      absenceDate: '2026-09-09',
+      absenceTime: '13:00',
+      startTime: '13:00',
+      endTime: '17:00',
+      timeRange: '13h à 17h',
+      className: 'GI / SIL2_B',
+      observations: 'Sans motif',
+      createdAt: `2026-09-09T13:00:00Z`,
+    });
+  });
+
   // 3. Fill up to match ~24 absences today, ~137 this week, ~1284 total
   const remainingToday = 18;
   for (let i = 0; i < remainingToday; i++) {
@@ -354,7 +463,12 @@ class StorageService {
       }
 
       const savedLevels = localStorage.getItem(STORAGE_KEYS.LEVELS);
-      if (savedLevels) this.levels = JSON.parse(savedLevels);
+      if (savedLevels) {
+        this.levels = (JSON.parse(savedLevels) as Level[]).map(l => ({
+          ...l,
+          name: l.name.replace(/^[0-9]+[èe]me?\s+année\s*\((Licence\s+[0-9]+)\)/i, '$1')
+        }));
+      }
 
       const savedSubjects = localStorage.getItem(STORAGE_KEYS.SUBJECTS);
       if (savedSubjects) {
@@ -1294,7 +1408,12 @@ class StorageService {
   }
 
   public getLevels(): Level[] {
-    return [...this.levels].sort((a, b) => a.order - b.order);
+    return [...this.levels]
+      .map(l => ({
+        ...l,
+        name: l.name.replace(/^[0-9]+[èe]me?\s+année\s*\((Licence\s+[0-9]+)\)/i, '$1')
+      }))
+      .sort((a, b) => a.order - b.order);
   }
 
   public getSubjects(programId?: string, levelId?: string): Subject[] {

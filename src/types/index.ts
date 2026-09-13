@@ -73,6 +73,7 @@ export interface Absence {
   justificationReason?: string;
   startTime?: string; // e.g. "08h00"
   endTime?: string; // e.g. "12h00"
+  timeRange?: string; // e.g. "08h à 12h"
   observations?: string; // e.g. "Sans motif"
   className?: string; // e.g. "GI / SIL2_A"
   sheetImportId?: string;
