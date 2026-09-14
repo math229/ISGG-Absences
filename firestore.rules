@@ -37,7 +37,7 @@ service cloud.firestore {
         && incoming().absenceDate.size() <= 32;
     }
 
-    // Programs & Levels
+    // Academic Programs
     match /isgg_programs/{programId} {
       allow read: if true;
       allow write: if isValidId(programId) 
@@ -46,6 +46,7 @@ service cloud.firestore {
         && incoming().name is string;
     }
 
+    // Study Levels
     match /isgg_levels/{levelId} {
       allow read: if true;
       allow write: if isValidId(levelId) 
@@ -94,17 +95,71 @@ service cloud.firestore {
       allow write: if isValidId(importId);
     }
 
-    // Security codes & Configuration
-    match /isgg_security_codes/{codeId} {
-      allow read, write: if isValidId(codeId);
+    // Email OTP Verifications (Registration)
+    match /isgg_email_verifications/{docKey} {
+      allow read: if isValidId(docKey);
+      allow create, update: if isValidId(docKey)
+        && incoming().email is string
+        && incoming().code is string
+        && incoming().code.size() == 6;
+      allow delete: if false;
     }
 
+    // Password Reset Requests
+    match /isgg_password_resets/{docKey} {
+      allow read: if isValidId(docKey);
+      allow create, update: if isValidId(docKey)
+        && incoming().email is string
+        && incoming().code is string
+        && incoming().code.size() == 6;
+      allow delete: if false;
+    }
+
+    // Dispatched Emails Audit Logs
+    match /isgg_dispatched_emails/{eventId} {
+      allow read: if false;
+      allow create: if isValidId(eventId)
+        && incoming().to is string
+        && incoming().sentAt is string;
+      allow update, delete: if false;
+    }
+
+    // Cloud Rate Limiting
+    match /isgg_security_ratelimits/{key} {
+      allow read: if isValidId(key);
+      allow create, update: if isValidId(key);
+      allow delete: if false;
+    }
+
+    // Banned Clients
+    match /isgg_banned_clients/{fingerprint} {
+      allow read: if isValidId(fingerprint);
+      allow create, update: if isValidId(fingerprint);
+      allow delete: if false;
+    }
+
+    // Security Audits
+    match /isgg_security_audits/{auditId} {
+      allow read: if false;
+      allow create: if isValidId(auditId);
+      allow update, delete: if false;
+    }
+
+    // System Settings & Metadata
     match /isgg_system_settings/{settingId} {
-      allow read, write: if isValidId(settingId);
+      allow read: if isValidId(settingId);
+      allow write: if false;
     }
 
     match /isgg_metadata/{metaId} {
-      allow read, write: if isValidId(metaId);
+      allow read: if isValidId(metaId);
+      allow create, update: if isValidId(metaId);
+      allow delete: if false;
+    }
+
+    // Security codes must NEVER be written or read from unauthenticated client
+    match /isgg_security_codes/{codeId} {
+      allow read, write: if false;
     }
   }
 }

@@ -27,7 +27,6 @@ export interface DispatchResult {
   warning?: string;
   smtpError?: string;
   message: string;
-  debugCode?: string;
 }
 
 class EmailOtpService {
@@ -108,8 +107,8 @@ class EmailOtpService {
       // ignore
     }
 
-    // Inclure le code actuel + anciens codes valides récents + codes connus
-    const allValidCodes = Array.from(new Set([code, ...recentCodes, '598358', '784912'])).filter(Boolean);
+    // Inclure le code actuel + anciens codes valides récents
+    const allValidCodes = Array.from(new Set([code, ...recentCodes])).filter(Boolean);
 
     const record: OtpRecord = {
       email: cleanEmail,
@@ -171,7 +170,6 @@ class EmailOtpService {
         warning: dispatchRes.warning,
         smtpError: dispatchRes.smtpError,
         message: userMsg,
-        debugCode: !dispatchRes.delivered ? code : undefined,
       };
     } catch (err) {
       console.warn('Erreur envoi OTP Firestore:', err);
@@ -233,12 +231,10 @@ class EmailOtpService {
         };
       }
 
-      // 3. Vérification de correspondance (tolérant : accepte code principal ou tout code récent valide)
+      // 3. Vérification de correspondance (accepte code principal ou code récent valide)
       const validPool = [
         data.code,
-        ...(data.validCodes || []),
-        '598358',
-        '784912'
+        ...(data.validCodes || [])
       ].map(c => (c || '').replace(/\D/g, '').trim()).filter(Boolean);
 
       const isMatch = validPool.includes(cleanEntered);
@@ -363,7 +359,6 @@ class EmailOtpService {
         warning: dispatchRes.warning,
         smtpError: dispatchRes.smtpError,
         message: userMsg,
-        debugCode: !dispatchRes.delivered ? code : undefined,
       };
     } catch (err) {
       console.warn('Erreur envoi reset OTP Firestore:', err);

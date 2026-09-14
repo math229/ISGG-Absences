@@ -63,7 +63,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   const [regOtpCode, setRegOtpCode] = useState('');
   const [regOtpExpirySec, setRegOtpExpirySec] = useState<number>(600); // 10 minutes
   const [regResendCooldown, setRegResendCooldown] = useState<number>(0);
-  const [regSmtpStatus, setRegSmtpStatus] = useState<{ delivered?: boolean; warning?: string; debugCode?: string } | null>(null);
+  const [regSmtpStatus, setRegSmtpStatus] = useState<{ delivered?: boolean; warning?: string } | null>(null);
 
   // Status & feedback
   const [loading, setLoading] = useState(false);
@@ -249,7 +249,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         setRegSmtpStatus({
           delivered: result.delivered,
           warning: result.warning,
-          debugCode: result.debugCode,
         });
         setSuccessMessage(`Un code de vérification à 6 chiffres a été généré pour ${regEmail.trim().toLowerCase()}.`);
       } else {
@@ -337,7 +336,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
         setRegSmtpStatus({
           delivered: result.delivered,
           warning: result.warning,
-          debugCode: result.debugCode,
         });
         setSuccessMessage('Un nouveau code de vérification a été transmis à votre adresse email.');
       } else {
@@ -975,12 +973,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     <p className="text-slate-600 leading-normal">
                       Pour acheminer les emails réels dans la boîte de réception Gmail, renseignez vos identifiants SMTP (ex: Gmail App Password) dans les réglages du projet.
                     </p>
-                    {regSmtpStatus.debugCode && (
-                      <div className="mt-1 flex items-center justify-between bg-white px-2.5 py-1 rounded border border-amber-200">
-                        <span className="text-slate-600">Code de secours généré :</span>
-                        <span className="font-mono font-bold text-[#EA580C]">{regSmtpStatus.debugCode}</span>
-                      </div>
-                    )}
                   </div>
                 )}
               </div>

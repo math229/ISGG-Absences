@@ -118,7 +118,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
 
   const handleToggleUserStatus = (userId: string) => {
     if (userId === currentUser.id) {
-      showToast('Action impossible : vous ne pouvez pas suspendre votre propre session active.', 'warning');
+      showToast('Action impossible : vous ne pouvez pas suspendre votre propre session active.', 'error');
       return;
     }
     const res = storage.toggleUserStatus(userId);
@@ -148,12 +148,9 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
         <p className="text-xs text-slate-500 leading-relaxed">
           Votre compte actuel ({currentUser.name}) dispose du rôle <strong>SURVEILLANT</strong>. Les fonctions d&apos;administration, de paramétrage des filières et de gestion des comptes sont réservées aux administrateurs.
         </p>
-        <button
-          onClick={() => storage.switchRole('ADMIN')}
-          className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-colors cursor-pointer"
-        >
-          Basculer en profil Administrateur
-        </button>
+        <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 font-medium">
+          Pour accéder aux réglages et à la gestion des filières, veuillez vous connecter avec les identifiants d&apos;un compte Directeur/Administrateur.
+        </div>
       </div>
     );
   }

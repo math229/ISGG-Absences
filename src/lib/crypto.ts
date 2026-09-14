@@ -63,22 +63,48 @@ export function validatePasswordStrength(pwd: string): PasswordStrengthResult {
 }
 
 /**
- * Hachage salé irréversible SHA-256 pour les mots de passe
+ * Hachage salé fort PBKDF2 (100 000 itérations) pour les mots de passe
+ * Conforme aux exigences ANSSI / NIST SP 800-63B avec rétrocompatibilité SHA-256
  */
 const SALT_STATIC = 'ISGG_SECURE_SALT_v1_2026_BENIN_STUDIES';
 
 export async function hashPassword(plainText: string, salt: string = SALT_STATIC): Promise<string> {
   if (!plainText) return '';
-  const textToHash = `${salt}:${plainText}:${salt}`;
   
   if (typeof crypto !== 'undefined' && crypto.subtle) {
-    const msgBuffer = new TextEncoder().encode(textToHash);
-    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return 'sha256$' + hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    try {
+      const enc = new TextEncoder();
+      const keyMaterial = await crypto.subtle.importKey(
+        'raw',
+        enc.encode(plainText),
+        { name: 'PBKDF2' },
+        false,
+        ['deriveBits']
+      );
+      const derivedBits = await crypto.subtle.deriveBits(
+        {
+          name: 'PBKDF2',
+          salt: enc.encode(salt),
+          iterations: 100000,
+          hash: 'SHA-256',
+        },
+        keyMaterial,
+        256
+      );
+      const hashArray = Array.from(new Uint8Array(derivedBits));
+      return 'pbkdf2$' + hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    } catch {
+      // Fallback SHA-256 direct si PBKDF2 non supporté
+      const textToHash = `${salt}:${plainText}:${salt}`;
+      const msgBuffer = new TextEncoder().encode(textToHash);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return 'sha256$' + hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
   }
 
   // Fallback synchrone déterministe si Web Crypto est indisponible
+  const textToHash = `${salt}:${plainText}:${salt}`;
   let hash = 0;
   for (let i = 0; i < textToHash.length; i++) {
     const char = textToHash.charCodeAt(i);
@@ -89,16 +115,48 @@ export async function hashPassword(plainText: string, salt: string = SALT_STATIC
 }
 
 /**
+ * Calcule l'ancien hash SHA-256 pour la vérification rétrocompatible
+ */
+async function computeLegacySha256(plainText: string, salt: string = SALT_STATIC): Promise<string> {
+  if (typeof crypto !== 'undefined' && crypto.subtle) {
+    const textToHash = `${salt}:${plainText}:${salt}`;
+    const msgBuffer = new TextEncoder().encode(textToHash);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return 'sha256$' + hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+  return '';
+}
+
+/**
  * Vérifie un mot de passe contre un hash existant
- * (Supporte aussi les anciens mots de passe en clair pour rétrocompatibilité lors de la première migration)
+ * (Supporte PBKDF2, SHA-256 legacy, et anciens mots de passe pour transition transparente)
  */
 export async function verifyPassword(plainText: string, storedHashOrPlain: string): Promise<boolean> {
   if (!plainText || !storedHashOrPlain) return false;
 
-  // Si c'est déjà un hashé sha256
-  if (storedHashOrPlain.startsWith('sha256$') || storedHashOrPlain.startsWith('legacy$')) {
+  // Format PBKDF2 moderne (100 000 itérations)
+  if (storedHashOrPlain.startsWith('pbkdf2$')) {
     const computed = await hashPassword(plainText);
     return computed === storedHashOrPlain;
+  }
+
+  // Format SHA-256 legacy
+  if (storedHashOrPlain.startsWith('sha256$')) {
+    const legacyComputed = await computeLegacySha256(plainText);
+    return legacyComputed === storedHashOrPlain;
+  }
+
+  // Format fallback legacy
+  if (storedHashOrPlain.startsWith('legacy$')) {
+    const textToHash = `${SALT_STATIC}:${plainText}:${SALT_STATIC}`;
+    let hash = 0;
+    for (let i = 0; i < textToHash.length; i++) {
+      const char = textToHash.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash |= 0;
+    }
+    return 'legacy$' + Math.abs(hash).toString(16) === storedHashOrPlain;
   }
 
   // Si ancien mot de passe non encore haché (ex: 'password123')

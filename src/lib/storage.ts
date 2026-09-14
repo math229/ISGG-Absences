@@ -482,6 +482,34 @@ class StorageService {
           } else if (this.currentUser && this.currentUser.avatarUrl && this.currentUser.avatarUrl.includes('images.unsplash.com')) {
             this.currentUser.avatarUrl = undefined;
             localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(this.currentUser));
+          } else if (this.currentUser) {
+            // Nettoyage de sécurité : s'assurer qu'aucun hash n'est présent dans l'objet en mémoire
+            if (this.currentUser.password) {
+              this.currentUser.password = '';
+              localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(this.currentUser));
+            }
+            // Rafraîchissement silencieux de la session HttpOnly auprès du backend
+            fetch('/api/auth/session')
+              .then((res) => {
+                if (res.status === 401) {
+                  // Si le cookie serveur est expiré ou absent alors qu'un utilisateur est en cache,
+                  // on tente de renouveler la session en douceur si le compte est valide
+                  if (this.currentUser) {
+                    fetch('/api/auth/session', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        userId: this.currentUser.id,
+                        email: this.currentUser.email,
+                        role: this.currentUser.role,
+                      }),
+                    }).catch(() => {});
+                  }
+                }
+              })
+              .catch(() => {
+                // Pas de réseau (mode déconnecté) -> Le profil cosmétique local permet de continuer l'appel
+              });
           }
         } catch {
           this.currentUser = null;
@@ -1112,12 +1140,36 @@ class StorageService {
   }
 
   public setCurrentUser(user: User | null): void {
-    this.currentUser = user;
-    if (typeof window !== 'undefined') {
-      if (user) {
-        localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(user));
-      } else {
+    if (user) {
+      // Nettoyage préventif : ne jamais laisser de hash de mot de passe dans le cache local
+      const safeUser: User = {
+        ...user,
+        password: '', // Masqué pour empêcher toute lecture de hash
+      };
+      this.currentUser = safeUser;
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(safeUser));
+        // Émission asynchrone du cookie HttpOnly de session vers le backend Express
+        fetch('/api/auth/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userId: safeUser.id,
+            email: safeUser.email,
+            role: safeUser.role,
+          }),
+        }).catch(() => {
+          // Si le serveur backend est temporairement indisponible (mode 100% hors-ligne),
+          // l'application continue sans bloquer l'utilisateur.
+        });
+      }
+    } else {
+      this.currentUser = null;
+      if (typeof window !== 'undefined') {
         localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+        // Révocation du cookie HttpOnly
+        fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
       }
     }
     this.notify();
@@ -1141,7 +1193,7 @@ class StorageService {
       };
 
       // Si le mot de passe est en clair, on s'assure qu'il est haché avant l'écriture dans Firestore
-      if (userPayload.password && !userPayload.password.startsWith('sha256$') && !userPayload.password.startsWith('legacy$')) {
+      if (userPayload.password && !userPayload.password.startsWith('pbkdf2$') && !userPayload.password.startsWith('sha256$') && !userPayload.password.startsWith('legacy$')) {
         userPayload.password = await hashPassword(userPayload.password);
       }
 
@@ -1166,21 +1218,11 @@ class StorageService {
     if (!enteredNorm) return false;
 
     if (role === 'ADMIN') {
-      const allowedAdminKeys = [
-        normalizeKey(this.securityCodes?.directorCode || ''),
-        normalizeKey('ISGG-DIR-9482'),
-        normalizeKey('ISGG-DIR-ADMIN-2026'),
-        normalizeKey(DEFAULT_SECURITY_CODES.directorCode),
-      ].filter(Boolean);
-      return allowedAdminKeys.includes(enteredNorm);
+      const activeCode = this.securityCodes?.directorCode || DEFAULT_SECURITY_CODES.directorCode;
+      return normalizeKey(activeCode) === enteredNorm;
     } else {
-      const allowedSurvKeys = [
-        normalizeKey(this.securityCodes?.surveillantCode || ''),
-        normalizeKey('ISGG-SURV-2026'),
-        normalizeKey('ISGG-SURV-ADMIN-2026'),
-        normalizeKey(DEFAULT_SECURITY_CODES.surveillantCode),
-      ].filter(Boolean);
-      return allowedSurvKeys.includes(enteredNorm);
+      const activeCode = this.securityCodes?.surveillantCode || DEFAULT_SECURITY_CODES.surveillantCode;
+      return normalizeKey(activeCode) === enteredNorm;
     }
   }
 
@@ -1291,7 +1333,6 @@ class StorageService {
       message: emailResult.message,
       delivered: emailResult.delivered,
       warning: emailResult.warning,
-      debugCode: emailResult.debugCode,
     };
   }
 
@@ -1403,7 +1444,6 @@ class StorageService {
       user,
       delivered: resetResult.delivered,
       warning: resetResult.warning,
-      debugCode: resetResult.debugCode,
     };
   }
 
@@ -1544,6 +1584,15 @@ class StorageService {
     // Mot de passe correct -> Réinitialise les échecs consécutifs
     await rateLimiter.recordSuccess(loginContextKey);
 
+    // Migration transparente du mot de passe vers le standard PBKDF2 100k s'il était dans un format antérieur
+    if (user.password && password && !user.password.startsWith('pbkdf2$')) {
+      try {
+        user.password = await hashPassword(password);
+      } catch (e) {
+        console.warn('Auto-upgrade to PBKDF2 failed:', e);
+      }
+    }
+
     user.lastLogin = 'Aujourd\'hui à ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
     this.setCurrentUser(user);
     this.persistUsers();
@@ -1603,7 +1652,11 @@ class StorageService {
   }
 
   public switchRole(role: 'SURVEILLANT' | 'ADMIN'): void {
-    const target = this.users.find(u => u.role === role) || this.users[0];
+    if (this.currentUser?.role !== 'ADMIN') {
+      console.warn('[Security] Tentative non autorisée de changement de rôle bloquée.');
+      return;
+    }
+    const target = this.users.find(u => u.role === role);
     if (target) {
       this.setCurrentUser(target);
     }

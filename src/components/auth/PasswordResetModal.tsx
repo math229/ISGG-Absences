@@ -45,7 +45,7 @@ export const PasswordResetModal: React.FC<PasswordResetModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [resendCooldown, setResendCooldown] = useState(0);
-  const [smtpStatus, setSmtpStatus] = useState<{ delivered?: boolean; warning?: string; debugCode?: string } | null>(null);
+  const [smtpStatus, setSmtpStatus] = useState<{ delivered?: boolean; warning?: string } | null>(null);
 
   useEffect(() => {
     if (initialEmail) {
@@ -74,6 +74,18 @@ export const PasswordResetModal: React.FC<PasswordResetModalProps> = ({
     return () => clearInterval(timer);
   }, [resendCooldown]);
 
+  // Fermeture accessible avec la touche Échap
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const pwdStrength = validatePasswordStrength(newPassword);
@@ -100,7 +112,6 @@ export const PasswordResetModal: React.FC<PasswordResetModalProps> = ({
         setSmtpStatus({
           delivered: res.delivered,
           warning: res.warning,
-          debugCode: res.debugCode,
         });
         setSuccess(`Un code de réinitialisation sécurisé à 6 chiffres a été préparé pour ${cleanEmail}.`);
       } else {
@@ -124,7 +135,6 @@ export const PasswordResetModal: React.FC<PasswordResetModalProps> = ({
         setSmtpStatus({
           delivered: res.delivered,
           warning: res.warning,
-          debugCode: res.debugCode,
         });
         setSuccess('Un nouveau code de vérification a été transmis.');
       } else {
@@ -293,12 +303,6 @@ export const PasswordResetModal: React.FC<PasswordResetModalProps> = ({
                     <p className="text-slate-600 leading-normal">
                       Pour acheminer les emails réels dans la boîte de réception, renseignez les paramètres SMTP dans les variables d&apos;environnement.
                     </p>
-                    {smtpStatus.debugCode && (
-                      <div className="mt-1 flex items-center justify-between bg-white px-2.5 py-1 rounded border border-amber-200">
-                        <span className="text-slate-600">Code de secours généré :</span>
-                        <span className="font-mono font-bold text-[#EA580C]">{smtpStatus.debugCode}</span>
-                      </div>
-                    )}
                   </div>
                 )}
               </div>

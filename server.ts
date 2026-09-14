@@ -1,26 +1,46 @@
 import express from 'express';
 import path from 'path';
+import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import nodemailer, { type Transporter } from 'nodemailer';
 import dotenv from 'dotenv';
+import { 
+  collection, 
+  getDocs, 
+  doc, 
+  getDoc, 
+  setDoc, 
+  writeBatch 
+} from 'firebase/firestore';
+import { serverDb } from './serverFirebase';
 
 dotenv.config();
 
 const app = express();
 const PORT = 3000;
 
+// Trust reverse proxy for accurate client IP resolution
+app.set('trust proxy', 1);
+
 // Security Headers Middleware
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https: blob:; connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://*.firebaseio.com https://*.googleapis.com; frame-ancestors *;"
+  );
   res.setHeader('Permissions-Policy', 'camera=*, microphone=*');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
   res.removeHeader('X-Powered-By');
   next();
 });
 
 // JSON body with bounded size to prevent denial of service
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '5mb' }));
 
 // In-memory rate limiting to protect endpoints against brute-force and flood attacks
 interface RateLimitRecord {
@@ -29,9 +49,19 @@ interface RateLimitRecord {
 }
 const apiRateLimits = new Map<string, RateLimitRecord>();
 
+// Periodic cleanup of expired rate limit records every 5 minutes to prevent memory leak
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of apiRateLimits.entries()) {
+    if (now > entry.resetAt) {
+      apiRateLimits.delete(key);
+    }
+  }
+}, 5 * 60 * 1000);
+
 function rateLimit(windowMs: number, maxRequests: number, endpointName: string) {
   return (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const rawIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || '127.0.0.1';
+    const rawIp = req.ip || (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || '127.0.0.1';
     const key = `${endpointName}:${rawIp}`;
     const now = Date.now();
     const entry = apiRateLimits.get(key) || { count: 0, resetAt: now + windowMs };
@@ -98,6 +128,141 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// ==========================================
+// SESSION MANAGEMENT (HttpOnly Cookie + HMAC-SHA256)
+// ==========================================
+const SESSION_COOKIE_NAME = 'isgg_auth_session';
+const SESSION_SECRET = (process.env.SESSION_SECRET || 'isgg-inst-auth-token-secret-2026-secure-key-9821').trim();
+const SESSION_MAX_AGE_SECONDS = 8 * 60 * 60; // 8 heures (durée d'une journée de cours)
+
+interface SessionPayload {
+  userId: string;
+  email: string;
+  role: string;
+  issuedAt: number;
+  expiresAt: number;
+}
+
+function signSessionToken(payload: Omit<SessionPayload, 'issuedAt' | 'expiresAt'>): string {
+  const now = Date.now();
+  const sessionData: SessionPayload = {
+    ...payload,
+    issuedAt: now,
+    expiresAt: now + (SESSION_MAX_AGE_SECONDS * 1000),
+  };
+  const json = Buffer.from(JSON.stringify(sessionData)).toString('base64url');
+  const signature = crypto
+    .createHmac('sha256', SESSION_SECRET)
+    .update(json)
+    .digest('base64url');
+  return `${json}.${signature}`;
+}
+
+function verifySessionToken(token: string): SessionPayload | null {
+  try {
+    if (!token || !token.includes('.')) return null;
+    const [json, signature] = token.split('.');
+    if (!json || !signature) return null;
+
+    const expectedSig = crypto
+      .createHmac('sha256', SESSION_SECRET)
+      .update(json)
+      .digest('base64url');
+
+    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSig))) {
+      return null;
+    }
+
+    const data: SessionPayload = JSON.parse(Buffer.from(json, 'base64url').toString('utf8'));
+    if (Date.now() > data.expiresAt) {
+      return null;
+    }
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function parseCookies(cookieHeader?: string): Record<string, string> {
+  const list: Record<string, string> = {};
+  if (!cookieHeader) return list;
+  cookieHeader.split(';').forEach((cookie) => {
+    const parts = cookie.split('=');
+    if (parts.length >= 2) {
+      const name = parts[0].trim();
+      const val = parts.slice(1).join('=').trim();
+      list[name] = decodeURIComponent(val);
+    }
+  });
+  return list;
+}
+
+// Route d'initialisation de session HttpOnly (appelée dès la connexion réussie)
+app.post('/api/auth/session', rateLimit(60000, 30, 'auth-session'), (req, res) => {
+  try {
+    const { userId, email, role } = req.body;
+    if (!userId || !email || !role) {
+      return res.status(400).json({ success: false, error: 'Paramètres utilisateur requis.' });
+    }
+
+    const token = signSessionToken({
+      userId: String(userId).trim(),
+      email: String(email).trim().toLowerCase(),
+      role: String(role).trim(),
+    });
+
+    const isSecure = process.env.NODE_ENV === 'production' || req.headers['x-forwarded-proto'] === 'https';
+    const cookieHeader = `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${SESSION_MAX_AGE_SECONDS}${isSecure ? '; Secure' : ''}`;
+    
+    res.setHeader('Set-Cookie', cookieHeader);
+    return res.json({
+      success: true,
+      message: 'Session sécurisée initialisée avec succès.',
+      expiresIn: SESSION_MAX_AGE_SECONDS,
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: 'Erreur lors de l\'initialisation de session.' });
+  }
+});
+
+// Route de vérification de session HttpOnly
+app.get('/api/auth/session', (req, res) => {
+  const cookies = parseCookies(req.headers.cookie);
+  const token = cookies[SESSION_COOKIE_NAME];
+  const session = token ? verifySessionToken(token) : null;
+
+  if (!session) {
+    return res.status(401).json({ authenticated: false });
+  }
+
+  return res.json({
+    authenticated: true,
+    userId: session.userId,
+    email: session.email,
+    role: session.role,
+    expiresAt: session.expiresAt,
+  });
+});
+
+// Route de déconnexion : détruit le cookie HttpOnly
+app.post('/api/auth/logout', (req, res) => {
+  const isSecure = process.env.NODE_ENV === 'production' || req.headers['x-forwarded-proto'] === 'https';
+  res.setHeader(
+    'Set-Cookie',
+    `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0${isSecure ? '; Secure' : ''}`
+  );
+  return res.json({ success: true, message: 'Session fermée.' });
+});
+
+function escapeHtml(text: string): string {
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 // API Send Institutional Email
 app.post('/api/send-email', rateLimit(60000, 15, 'send-email'), async (req, res) => {
   try {
@@ -127,7 +292,8 @@ app.post('/api/send-email', rateLimit(60000, 15, 'send-email'), async (req, res)
       });
     }
     const formattedRole = role === 'ADMIN' ? 'Directeur' : (role === 'SURVEILLANT' ? 'Surveillant' : 'Membre du Personnel');
-    const greetingName = recipientName ? `Bonjour ${recipientName},` : 'Bonjour,';
+    const safeRecipientName = recipientName ? escapeHtml(String(recipientName).trim()) : '';
+    const greetingName = safeRecipientName ? `Bonjour ${safeRecipientName},` : 'Bonjour,';
 
     const purposeTitle = purpose === 'PASSWORD_RESET' 
       ? 'Réinitialisation de votre mot de passe'
@@ -264,15 +430,6 @@ Direction des Études - ISGG Calavi, Bénin
 // ==========================================
 // API REST DE SYNCHRONISATION ÉTUDIANTS ISGG
 // ==========================================
-import { 
-  collection, 
-  getDocs, 
-  doc, 
-  getDoc, 
-  setDoc, 
-  writeBatch 
-} from 'firebase/firestore';
-import { serverDb } from './serverFirebase';
 
 // Vérification de la clé secrète API
 async function verifyApiKey(req: express.Request): Promise<boolean> {
@@ -305,8 +462,8 @@ async function verifyApiKey(req: express.Request): Promise<boolean> {
     console.warn('[Sync API] Erreur lecture settings Firestore:', e);
   }
 
-  // 3. Clé par défaut sécurisée
-  return incomingKey === 'isgg_live_key_9482f5b8e1';
+  // 3. Aucune clé valide trouvée
+  return false;
 }
 
 // Normalisation des filières et niveaux
@@ -434,10 +591,13 @@ app.post('/api/v1/sync/students', rateLimit(60000, 60, 'sync-api-write'), async 
 
     let createdCount = 0;
     let updatedCount = 0;
-    const batch = writeBatch(serverDb);
     const now = new Date().toISOString();
 
     const processedStudents: any[] = [];
+    const BATCH_SIZE = 400;
+    const batches: Array<ReturnType<typeof writeBatch>> = [];
+    let currentBatch = writeBatch(serverDb);
+    let currentOps = 0;
 
     for (const raw of rawList) {
       const matricule = (raw.matricule || raw.Matricule || raw.reference || '').trim();
@@ -460,6 +620,12 @@ app.post('/api/v1/sync/students', rateLimit(60000, 60, 'sync-api-write'), async 
 
       const existing = matriculeMap.get(safeMatricule.toUpperCase());
 
+      if (currentOps >= BATCH_SIZE) {
+        batches.push(currentBatch);
+        currentBatch = writeBatch(serverDb);
+        currentOps = 0;
+      }
+
       if (existing) {
         // Mise à jour (Conserve l'ID unique et préserve les absences associées)
         const updatedStudent = {
@@ -476,7 +642,8 @@ app.post('/api/v1/sync/students', rateLimit(60000, 60, 'sync-api-write'), async 
         };
 
         const docRef = doc(serverDb, 'isgg_students', existing.id);
-        batch.set(docRef, updatedStudent, { merge: true });
+        currentBatch.set(docRef, updatedStudent, { merge: true });
+        currentOps++;
         updatedCount++;
         processedStudents.push(updatedStudent);
       } else {
@@ -497,15 +664,22 @@ app.post('/api/v1/sync/students', rateLimit(60000, 60, 'sync-api-write'), async 
         };
 
         const docRef = doc(serverDb, 'isgg_students', newId);
-        batch.set(docRef, newStudent);
+        currentBatch.set(docRef, newStudent);
+        currentOps++;
         matriculeMap.set(safeMatricule.toUpperCase(), newStudent);
         createdCount++;
         processedStudents.push(newStudent);
       }
     }
 
+    if (currentOps > 0) {
+      batches.push(currentBatch);
+    }
+
     if (createdCount > 0 || updatedCount > 0) {
-      await batch.commit();
+      for (const b of batches) {
+        await b.commit();
+      }
 
       // Mettre à jour les métadonnées de dernière synchronisation
       try {

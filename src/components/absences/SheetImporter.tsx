@@ -148,7 +148,7 @@ export const SheetImporter: React.FC<SheetImporterProps> = ({
       setPhase('review');
     } catch (err) {
       console.error(err);
-      showToast('Erreur lors de l\'analyse du document', 'warning');
+      showToast('Erreur lors de l\'analyse du document', 'error');
       setPhase('idle');
     }
   };
@@ -409,7 +409,7 @@ export const SheetImporter: React.FC<SheetImporterProps> = ({
       onImportComplete();
     } catch (error) {
       console.error(error);
-      showToast('Une erreur est survenue lors de l\'enregistrement', 'warning');
+      showToast('Une erreur est survenue lors de l\'enregistrement', 'error');
     } finally {
       setIsSaving(false);
     }

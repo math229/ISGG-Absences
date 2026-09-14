@@ -2,6 +2,7 @@ import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { storage } from './lib/storage';
 import { User } from './types';
 import { ToastProvider } from './components/common/Toast';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { LoginPage } from './components/auth/LoginPage';
 import { Sidebar, NavView } from './components/common/Sidebar';
 import { Header } from './components/common/Header';
@@ -69,15 +70,18 @@ export default function App() {
 
   if (!currentUser) {
     return (
-      <ToastProvider>
-        <LoginPage onLoginSuccess={handleLoginSuccess} />
-      </ToastProvider>
+      <ErrorBoundary>
+        <ToastProvider>
+          <LoginPage onLoginSuccess={handleLoginSuccess} />
+        </ToastProvider>
+      </ErrorBoundary>
     );
   }
 
   return (
-    <ToastProvider>
-      <div className="min-h-screen bg-[#F8F9FA] text-[#0F172A] flex flex-col lg:flex-row font-sans">
+    <ErrorBoundary>
+      <ToastProvider>
+        <div className="min-h-screen bg-[#F8F9FA] text-[#0F172A] flex flex-col lg:flex-row font-sans">
         {/* Sidebar */}
         <Sidebar
           currentView={currentView}
@@ -321,5 +325,6 @@ export default function App() {
         )}
       </div>
     </ToastProvider>
+  </ErrorBoundary>
   );
 }

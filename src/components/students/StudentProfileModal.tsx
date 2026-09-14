@@ -48,6 +48,17 @@ export const StudentProfileModal: React.FC<StudentProfileModalProps> = ({ studen
     return () => unsub();
   }, [studentId]);
 
+  // Fermeture accessible avec la touche Échap
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   const cleanLevelName = (name?: string) => {
     if (!name) return '';
     return name.replace(/^[0-9]+[èe]me?\s+année\s*\((Licence\s+[0-9]+)\)/i, '$1').trim();
