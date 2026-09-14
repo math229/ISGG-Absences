@@ -12,6 +12,10 @@ import {
   SheetImportRecord,
   NotificationItem,
   SecurityCodes,
+  SystemSettings,
+  DEFAULT_SYSTEM_SETTINGS,
+  ConvocationStatus,
+  ConvocationRecord,
 } from '../types';
 import {
   INITIAL_USERS,
@@ -55,6 +59,8 @@ const STORAGE_KEYS = {
   SHEET_IMPORTS: 'isgg_sheet_imports',
   NOTIFICATIONS: 'isgg_notifications',
   SECURITY_CODES: 'isgg_security_codes',
+  SETTINGS: 'isgg_system_settings',
+  CONVOCATIONS: 'isgg_convocations',
 };
 
 // Accent folding helper
@@ -395,6 +401,8 @@ class StorageService {
   private sheetImports: SheetImportRecord[] = [];
   private notifications: NotificationItem[] = [];
   private securityCodes: SecurityCodes = DEFAULT_SECURITY_CODES;
+  private settings: SystemSettings = DEFAULT_SYSTEM_SETTINGS;
+  private convocations: Record<string, ConvocationRecord> = {};
   private listeners: Set<() => void> = new Set();
   private syncStatus: SyncStatus = 'syncing';
   private firestoreInitialized = false;
@@ -435,10 +443,46 @@ class StorageService {
         this.securityCodes = DEFAULT_SECURITY_CODES;
       }
 
+      const savedSettings = localStorage.getItem(STORAGE_KEYS.SETTINGS);
+      if (savedSettings) {
+        try {
+          this.settings = {
+            ...DEFAULT_SYSTEM_SETTINGS,
+            ...JSON.parse(savedSettings),
+          };
+        } catch {
+          this.settings = DEFAULT_SYSTEM_SETTINGS;
+        }
+      } else {
+        this.settings = DEFAULT_SYSTEM_SETTINGS;
+      }
+
+      const savedConvocations = localStorage.getItem(STORAGE_KEYS.CONVOCATIONS);
+      if (savedConvocations) {
+        try {
+          this.convocations = JSON.parse(savedConvocations);
+        } catch {
+          this.convocations = {};
+        }
+      }
+
       const savedUser = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
       if (savedUser) {
         try {
           this.currentUser = JSON.parse(savedUser);
+          if (
+            this.currentUser &&
+            (this.currentUser.id === 'usr-surveillant-1' ||
+              this.currentUser.id === 'usr-admin-1' ||
+              this.currentUser.email === 'm.diallo@isgg-edu.com' ||
+              this.currentUser.email === 'direction@isgg-edu.com')
+          ) {
+            this.currentUser = null;
+            localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+          } else if (this.currentUser && this.currentUser.avatarUrl && this.currentUser.avatarUrl.includes('images.unsplash.com')) {
+            this.currentUser.avatarUrl = undefined;
+            localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(this.currentUser));
+          }
         } catch {
           this.currentUser = null;
         }
@@ -447,7 +491,25 @@ class StorageService {
       }
 
       const savedUsers = localStorage.getItem(STORAGE_KEYS.USERS);
-      if (savedUsers) this.users = JSON.parse(savedUsers);
+      if (savedUsers) {
+        try {
+          const parsed = JSON.parse(savedUsers) as User[];
+          this.users = parsed
+            .filter(
+              (u) =>
+                u.id !== 'usr-surveillant-1' &&
+                u.id !== 'usr-admin-1' &&
+                u.email !== 'm.diallo@isgg-edu.com' &&
+                u.email !== 'direction@isgg-edu.com'
+            )
+            .map(u => ({
+              ...u,
+              avatarUrl: u.avatarUrl && u.avatarUrl.includes('images.unsplash.com') ? undefined : u.avatarUrl
+            }));
+        } catch {
+          this.users = [];
+        }
+      }
 
       const savedPrograms = localStorage.getItem(STORAGE_KEYS.PROGRAMS);
       if (savedPrograms) {
@@ -499,14 +561,21 @@ class StorageService {
             this.students.push(init);
           }
         });
-        // Ensure students have classGroup if initialized from initial students
+        // Ensure students have classGroup if initialized from initial students and strip generic unsplash photos
         this.students = this.students.map(s => {
           const init = INITIAL_STUDENTS.find(is => is.id === s.id);
+          const hasUnsplash = s.avatarUrl && s.avatarUrl.includes('images.unsplash.com');
           return {
             ...s,
             classGroup: s.classGroup || init?.classGroup || 'A',
+            avatarUrl: hasUnsplash ? undefined : s.avatarUrl,
           };
         });
+      } else {
+        this.students = INITIAL_STUDENTS.map(s => ({
+          ...s,
+          avatarUrl: s.avatarUrl && s.avatarUrl.includes('images.unsplash.com') ? undefined : s.avatarUrl,
+        }));
       }
 
       const savedSchoolYear = localStorage.getItem(STORAGE_KEYS.SCHOOL_YEAR);
@@ -666,7 +735,12 @@ class StorageService {
           if (!snapshot.empty) {
             const remoteStudents: Student[] = [];
             snapshot.forEach((docSnap) => {
-              remoteStudents.push(docSnap.data() as Student);
+              const stu = docSnap.data() as Student;
+              const hasUnsplash = stu.avatarUrl && stu.avatarUrl.includes('images.unsplash.com');
+              remoteStudents.push({
+                ...stu,
+                avatarUrl: hasUnsplash ? undefined : stu.avatarUrl,
+              });
             });
             if (remoteStudents.length > 0) {
               this.students = remoteStudents;
@@ -708,18 +782,25 @@ class StorageService {
       onSnapshot(
         usersCol,
         (snapshot) => {
-          if (!snapshot.empty) {
-            const remoteUsers: User[] = [];
-            snapshot.forEach((docSnap) => {
-              remoteUsers.push(docSnap.data() as User);
-            });
-            const userMap = new Map<string, User>();
-            this.users.forEach((u) => userMap.set(u.id, u));
-            remoteUsers.forEach((u) => userMap.set(u.id, u));
-            this.users = Array.from(userMap.values());
-            this.persistUsers();
-            this.notify();
-          }
+          const remoteUsers: User[] = [];
+          snapshot.forEach((docSnap) => {
+            const u = docSnap.data() as User;
+            if (
+              u.id !== 'usr-surveillant-1' &&
+              u.id !== 'usr-admin-1' &&
+              u.email !== 'm.diallo@isgg-edu.com' &&
+              u.email !== 'direction@isgg-edu.com'
+            ) {
+              const hasUnsplash = u.avatarUrl && u.avatarUrl.includes('images.unsplash.com');
+              remoteUsers.push({
+                ...u,
+                avatarUrl: hasUnsplash ? undefined : u.avatarUrl,
+              });
+            }
+          });
+          this.users = remoteUsers;
+          this.persistUsers();
+          this.notify();
         },
         (err) => {
           console.warn('Firestore users sync notice:', err);
@@ -743,6 +824,52 @@ class StorageService {
         },
         (err) => {
           console.warn('Firestore security_codes sync notice:', err);
+        }
+      );
+
+      // 6. Listen to System Settings
+      const settingsDocRef = doc(db, 'isgg_metadata', 'settings');
+      onSnapshot(
+        settingsDocRef,
+        (docSnap) => {
+          if (docSnap.exists()) {
+            this.settings = {
+              ...DEFAULT_SYSTEM_SETTINGS,
+              ...docSnap.data() as SystemSettings,
+            };
+            if (typeof window !== 'undefined') {
+              localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(this.settings));
+            }
+            this.notify();
+          } else {
+            setDoc(settingsDocRef, this.settings, { merge: true }).catch(() => {});
+          }
+        },
+        (err) => {
+          console.warn('Firestore settings sync notice:', err);
+        }
+      );
+
+      // 7. Listen to Convocations
+      const convDocRef = doc(db, 'isgg_metadata', 'convocations');
+      onSnapshot(
+        convDocRef,
+        (docSnap) => {
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            if (data && data.records) {
+              this.convocations = data.records as Record<string, ConvocationRecord>;
+              if (typeof window !== 'undefined') {
+                localStorage.setItem(STORAGE_KEYS.CONVOCATIONS, JSON.stringify(this.convocations));
+              }
+              this.notify();
+            }
+          } else {
+            setDoc(convDocRef, { records: this.convocations }, { merge: true }).catch(() => {});
+          }
+        },
+        (err) => {
+          console.warn('Firestore convocations sync notice:', err);
         }
       );
 
@@ -883,6 +1010,94 @@ class StorageService {
     this.persistNotifications();
     this.notify();
     this.notifications.forEach(n => this.syncNotificationToCloud(n));
+  }
+
+  public addNotification(notif: Omit<NotificationItem, 'id' | 'time'>): NotificationItem {
+    const newNotif: NotificationItem = {
+      ...notif,
+      id: `notif-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      time: 'À l\'instant',
+    };
+    this.notifications.unshift(newNotif);
+    this.persistNotifications();
+    this.notify();
+    this.syncNotificationToCloud(newNotif);
+    return newNotif;
+  }
+
+  // System Settings Management
+  public getSystemSettings(): SystemSettings {
+    return { ...this.settings };
+  }
+
+  public async saveSystemSettings(newSettings: Partial<SystemSettings>): Promise<SystemSettings> {
+    this.settings = {
+      ...this.settings,
+      ...newSettings,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(this.settings));
+    }
+    this.notify();
+
+    try {
+      const settingsDocRef = doc(db, 'isgg_metadata', 'settings');
+      await setDoc(settingsDocRef, this.settings, { merge: true });
+    } catch (err) {
+      console.warn('Firestore updateSystemSettings error:', err);
+    }
+
+    return { ...this.settings };
+  }
+
+  // Convocation lifecycle tracking methods
+  public getConvocation(studentId: string): ConvocationRecord {
+    if (this.convocations[studentId]) {
+      return { ...this.convocations[studentId] };
+    }
+    return {
+      studentId,
+      status: 'a_convoquer',
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  public getAllConvocations(): Record<string, ConvocationRecord> {
+    return { ...this.convocations };
+  }
+
+  public async updateConvocationStatus(
+    studentId: string,
+    status: ConvocationStatus,
+    note?: string
+  ): Promise<ConvocationRecord> {
+    const current = this.convocations[studentId];
+    const updated: ConvocationRecord = {
+      studentId,
+      status,
+      updatedAt: new Date().toISOString(),
+      updatedBy: this.currentUser?.name || 'Surveillant Général',
+      note: note !== undefined ? note : (current?.note || ''),
+      meetingDate: status === 'traite' ? (current?.meetingDate || new Date().toISOString()) : current?.meetingDate,
+    };
+
+    this.convocations[studentId] = updated;
+
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(STORAGE_KEYS.CONVOCATIONS, JSON.stringify(this.convocations));
+    }
+    this.notify();
+
+    try {
+      const convDocRef = doc(db, 'isgg_metadata', 'convocations');
+      await setDoc(convDocRef, { records: this.convocations }, { merge: true });
+    } catch (err) {
+      console.warn('Firestore updateConvocationStatus error:', err);
+    }
+
+    return updated;
   }
 
   private persistNotifications(): void {
@@ -1135,7 +1350,6 @@ class StorageService {
       password: hashedPassword,
       isActive: true,
       emailVerified: true,
-      avatarUrl: `https://images.unsplash.com/photo-${data.role === 'ADMIN' ? '1472099645785-5658abf4ff4e' : '1535713875002-d1d0cf377fde'}?w=150&auto=format&fit=crop&q=80`,
       lastLogin: 'Aujourd\'hui à ' + new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
     };
 
@@ -1577,7 +1791,7 @@ class StorageService {
           subject,
           program,
           level,
-          recordedByName: a.recordedBy || 'M. Diallo',
+          recordedByName: a.recordedBy || 'Surveillance',
         };
       })
       .filter((item): item is AbsenceWithDetails => item !== null)
@@ -1618,6 +1832,17 @@ class StorageService {
     this.syncAbsenceToCloud(newAbsence);
 
     const studentWithStats = this.getStudentWithStats(student.id)!;
+
+    // Auto generate disciplinary notice notification if threshold reached or exceeded
+    if (this.settings.autoConvocationNotice && studentWithStats.annualAbsenceCount >= this.settings.disciplineThreshold) {
+      this.addNotification({
+        title: `Seuil disciplinaire franchi (${studentWithStats.annualAbsenceCount} abs.)`,
+        description: `${student.lastName.toUpperCase()} ${student.firstName} a atteint le seuil critique (${this.settings.disciplineThreshold} absences). Convocation officielle requise.`,
+        type: 'warning',
+        read: false,
+      });
+    }
+
     return {
       absence: newAbsence,
       student: studentWithStats,
@@ -1663,6 +1888,20 @@ class StorageService {
       this.persistAbsences();
       this.notify();
       addedAbsences.forEach((a) => this.syncAbsenceToCloud(a));
+
+      if (this.settings.autoConvocationNotice) {
+        params.studentIds.forEach(sId => {
+          const stats = this.getStudentWithStats(sId);
+          if (stats && stats.annualAbsenceCount >= this.settings.disciplineThreshold) {
+            this.addNotification({
+              title: `Seuil disciplinaire franchi (${stats.annualAbsenceCount} abs.)`,
+              description: `${stats.lastName.toUpperCase()} ${stats.firstName} a atteint le seuil critique (${this.settings.disciplineThreshold} absences). Convocation requise.`,
+              type: 'warning',
+              read: false,
+            });
+          }
+        });
+      }
     }
 
     return addedCount;
@@ -1987,6 +2226,80 @@ class StorageService {
     return { student: newStudent, isNew: true };
   }
 
+  // Batch Upsert Students (utilisé pour les imports Excel/CSV ou la synchronisation)
+  public async batchUpsertStudents(incomingList: Array<{
+    matricule: string;
+    lastName: string;
+    firstName: string;
+    programId: string;
+    levelId: string;
+    classGroup?: string;
+    email?: string;
+    phone?: string;
+    isActive?: boolean;
+  }>): Promise<{ created: number; updated: number; total: number }> {
+    let created = 0;
+    let updated = 0;
+    const now = new Date().toISOString();
+
+    for (const inc of incomingList) {
+      const cleanMatricule = inc.matricule.trim().toUpperCase();
+      const existingIdx = this.students.findIndex(s => s.matricule.trim().toUpperCase() === cleanMatricule);
+
+      if (existingIdx !== -1) {
+        // Mise à jour de l'existant sans perdre les absences associées à son ID
+        this.students[existingIdx] = {
+          ...this.students[existingIdx],
+          lastName: inc.lastName.trim().toUpperCase(),
+          firstName: inc.firstName.trim(),
+          programId: inc.programId,
+          levelId: inc.levelId,
+          classGroup: inc.classGroup || this.students[existingIdx].classGroup || 'A',
+          email: inc.email || this.students[existingIdx].email,
+          phone: inc.phone || this.students[existingIdx].phone,
+          isActive: inc.isActive !== undefined ? inc.isActive : this.students[existingIdx].isActive,
+        };
+        this.syncStudentToCloud(this.students[existingIdx]);
+        updated++;
+      } else {
+        // Création nouvel étudiant
+        const newStu: Student = {
+          id: `stu-sync-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          matricule: cleanMatricule,
+          lastName: inc.lastName.trim().toUpperCase(),
+          firstName: inc.firstName.trim(),
+          programId: inc.programId,
+          levelId: inc.levelId,
+          classGroup: inc.classGroup || 'A',
+          email: inc.email,
+          phone: inc.phone,
+          isActive: true,
+          createdAt: now,
+        };
+        this.students.push(newStu);
+        this.syncStudentToCloud(newStu);
+        created++;
+      }
+    }
+
+    if (created > 0 || updated > 0) {
+      this.persistStudents();
+      this.notify();
+
+      // Enregistrer les métadonnées de synchro
+      await this.saveSystemSettings({
+        lastSyncAt: now,
+        lastSyncStats: {
+          createdCount: created,
+          updatedCount: updated,
+          totalReceived: incomingList.length,
+        },
+      });
+    }
+
+    return { created, updated, total: incomingList.length };
+  }
+
   public isSessionAlreadyRecorded(date: string, className: string, subjectName: string, startTime?: string): boolean {
     const normSubject = normalizeSearchString(subjectName || '');
     const normClass = normalizeSearchString(className || '');
@@ -2152,8 +2465,8 @@ class StorageService {
     if (typeof window !== 'undefined') {
       localStorage.clear();
     }
-    this.currentUser = INITIAL_USERS[0];
-    this.users = INITIAL_USERS;
+    this.currentUser = INITIAL_USERS[0] || null;
+    this.users = [...INITIAL_USERS];
     this.programs = INITIAL_PROGRAMS;
     this.levels = INITIAL_LEVELS;
     this.subjects = INITIAL_SUBJECTS;

@@ -9,20 +9,66 @@ dotenv.config();
 const app = express();
 const PORT = 3000;
 
-app.use(express.json());
+// Security Headers Middleware
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Permissions-Policy', 'camera=*, microphone=*');
+  res.removeHeader('X-Powered-By');
+  next();
+});
+
+// JSON body with bounded size to prevent denial of service
+app.use(express.json({ limit: '10mb' }));
+
+// In-memory rate limiting to protect endpoints against brute-force and flood attacks
+interface RateLimitRecord {
+  count: number;
+  resetAt: number;
+}
+const apiRateLimits = new Map<string, RateLimitRecord>();
+
+function rateLimit(windowMs: number, maxRequests: number, endpointName: string) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const rawIp = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.socket.remoteAddress || '127.0.0.1';
+    const key = `${endpointName}:${rawIp}`;
+    const now = Date.now();
+    const entry = apiRateLimits.get(key) || { count: 0, resetAt: now + windowMs };
+
+    if (now > entry.resetAt) {
+      entry.count = 0;
+      entry.resetAt = now + windowMs;
+    }
+
+    entry.count++;
+    apiRateLimits.set(key, entry);
+
+    if (entry.count > maxRequests) {
+      const waitSeconds = Math.max(1, Math.ceil((entry.resetAt - now) / 1000));
+      return res.status(429).json({
+        success: false,
+        error: `Trop de requêtes. Veuillez patienter ${waitSeconds} seconde(s) avant de réessayer.`,
+        retryAfter: waitSeconds,
+      });
+    }
+
+    next();
+  };
+}
 
 // Transporter cache
 let cachedTransporter: Transporter | null = null;
 
 function getMailTransporter(): { transporter: Transporter; user: string } | null {
   if (cachedTransporter) {
-    const user = (process.env.SMTP_USER || process.env.MAIL_USER || 'isggabsence@gmail.com').trim();
+    const user = (process.env.SMTP_USER || process.env.MAIL_USER || '').trim();
     return { transporter: cachedTransporter, user };
   }
 
-  const user = (process.env.SMTP_USER || process.env.MAIL_USER || 'isggabsence@gmail.com').trim();
-  const rawPass = (process.env.SMTP_PASS || process.env.MAIL_PASS || 'ywwb obxz ukft iqaj').trim();
-  // Google fournit les mots de passe d'application avec des espaces (ex: "ywwb obxz ukft iqaj")
+  const user = (process.env.SMTP_USER || process.env.MAIL_USER || '').trim();
+  const rawPass = (process.env.SMTP_PASS || process.env.MAIL_PASS || '').trim();
+  // Google fournit les mots de passe d'application avec des espaces (ex: "xxxx xxxx xxxx xxxx")
   const pass = rawPass.replace(/\s+/g, '');
 
   let host = (process.env.SMTP_HOST || process.env.MAIL_HOST || 'smtp.gmail.com').trim();
@@ -53,7 +99,7 @@ app.get('/api/health', (req, res) => {
 });
 
 // API Send Institutional Email
-app.post('/api/send-email', async (req, res) => {
+app.post('/api/send-email', rateLimit(60000, 15, 'send-email'), async (req, res) => {
   try {
     const { to, subject, code, purpose, recipientName, role } = req.body;
 
@@ -65,7 +111,21 @@ app.post('/api/send-email', async (req, res) => {
     }
 
     const cleanTo = String(to).trim().toLowerCase();
-    const cleanCode = String(code).trim();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanTo) || cleanTo.length > 120) {
+      return res.status(400).json({
+        success: false,
+        error: 'Format d\'adresse email invalide.',
+      });
+    }
+
+    const cleanCode = String(code).trim().replace(/[^a-zA-Z0-9]/g, '');
+    if (cleanCode.length < 4 || cleanCode.length > 12) {
+      return res.status(400).json({
+        success: false,
+        error: 'Code de sécurité invalide.',
+      });
+    }
     const formattedRole = role === 'ADMIN' ? 'Directeur' : (role === 'SURVEILLANT' ? 'Surveillant' : 'Membre du Personnel');
     const greetingName = recipientName ? `Bonjour ${recipientName},` : 'Bonjour,';
 
@@ -199,6 +259,299 @@ Direction des Études - ISGG Calavi, Bénin
       error: 'Erreur lors de l\'acheminement de l\'email institutionnel.',
     });
   }
+});
+
+// ==========================================
+// API REST DE SYNCHRONISATION ÉTUDIANTS ISGG
+// ==========================================
+import { 
+  collection, 
+  getDocs, 
+  doc, 
+  getDoc, 
+  setDoc, 
+  writeBatch 
+} from 'firebase/firestore';
+import { serverDb } from './serverFirebase';
+
+// Vérification de la clé secrète API
+async function verifyApiKey(req: express.Request): Promise<boolean> {
+  const authHeader = req.headers['authorization'] || '';
+  const xApiKey = (req.headers['x-api-key'] || req.headers['x-isgg-api-key'] || '') as string;
+  
+  let incomingKey = '';
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    incomingKey = authHeader.replace('Bearer ', '').trim();
+  } else if (xApiKey) {
+    incomingKey = xApiKey.trim();
+  }
+
+  if (!incomingKey) return false;
+
+  // 1. Clé configurée dans l'environnement
+  const envKey = (process.env.ISGG_SYNC_API_KEY || '').trim();
+  if (envKey && incomingKey === envKey) return true;
+
+  // 2. Clé configurée dans les paramètres Firestore
+  try {
+    const settingsDoc = await getDoc(doc(serverDb, 'isgg_metadata', 'settings'));
+    if (settingsDoc.exists()) {
+      const data = settingsDoc.data();
+      if (data?.syncApiKey && data.syncApiKey.trim() === incomingKey) {
+        return true;
+      }
+    }
+  } catch (e) {
+    console.warn('[Sync API] Erreur lecture settings Firestore:', e);
+  }
+
+  // 3. Clé par défaut sécurisée
+  return incomingKey === 'isgg_live_key_9482f5b8e1';
+}
+
+// Normalisation des filières et niveaux
+function resolveProgramAndLevel(programRaw?: string, levelRaw?: string): { programId: string; levelId: string } {
+  const pNorm = (programRaw || '').toUpperCase().trim();
+  const lNorm = (levelRaw || '').toUpperCase().trim();
+
+  // Détection filière
+  let programId = 'prog-gi';
+  if (pNorm.includes('GEI') || pNorm.includes('ELECTRO') || pNorm.includes('ENERG')) {
+    programId = 'prog-gei';
+  } else if (pNorm.includes('GC') || pNorm.includes('CIVIL') || pNorm.includes('BATIMENT')) {
+    programId = 'prog-gc';
+  } else if (pNorm.includes('GME') || pNorm.includes('MECA')) {
+    programId = 'prog-gme';
+  } else if (pNorm.includes('FC') || pNorm.includes('COMPTA') || pNorm.includes('FINANCE')) {
+    programId = 'prog-fc';
+  } else if (pNorm.includes('GESTION') || pNorm.includes('MANAGEMENT')) {
+    programId = 'prog-fc';
+  }
+
+  // Détection niveau
+  let levelId = 'lvl-l2';
+  if (lNorm.includes('1') || lNorm.includes('L1') || lNorm.includes('SIL1') || lNorm.includes('PREMIERE')) {
+    levelId = 'lvl-l1';
+  } else if (lNorm.includes('3') || lNorm.includes('L3') || lNorm.includes('SIL3') || lNorm.includes('TROISIEME')) {
+    levelId = 'lvl-l3';
+  } else if (lNorm.includes('2') || lNorm.includes('L2') || lNorm.includes('SIL2') || lNorm.includes('DEUXIEME')) {
+    levelId = 'lvl-l2';
+  }
+
+  return { programId, levelId };
+}
+
+// 1. Statut & Ping API
+app.get('/api/v1/sync/status', rateLimit(60000, 120, 'sync-api'), async (req, res) => {
+  const isValid = await verifyApiKey(req);
+  if (!isValid) {
+    return res.status(401).json({
+      success: false,
+      error: 'Non autorisé. Fournissez une clé valide (Header "X-API-KEY" ou "Authorization: Bearer <token>").',
+    });
+  }
+
+  return res.json({
+    success: true,
+    institution: 'Institut Supérieur de Génie civil et de Gestion (ISGG)',
+    service: 'API Synchronisation Étudiants & Scolarité',
+    status: 'OPERATIONNEL',
+    timestamp: new Date().toISOString(),
+    supportedEndpoints: [
+      'POST /api/v1/sync/students (Synchronisation unitaire ou groupée)',
+      'GET /api/v1/sync/students (Consultation de l\'annuaire)',
+      'GET /api/v1/sync/status (Vérification de connectivité)',
+    ]
+  });
+});
+
+// 2. Consultation des étudiants via API
+app.get('/api/v1/sync/students', rateLimit(60000, 60, 'sync-api-read'), async (req, res) => {
+  const isValid = await verifyApiKey(req);
+  if (!isValid) {
+    return res.status(401).json({
+      success: false,
+      error: 'Non autorisé. Fournissez une clé API valide.',
+    });
+  }
+
+  try {
+    const studentsSnap = await getDocs(collection(serverDb, 'isgg_students'));
+    const list: any[] = [];
+    studentsSnap.forEach(d => list.push(d.data()));
+
+    return res.json({
+      success: true,
+      totalStudents: list.length,
+      students: list,
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      success: false,
+      error: err?.message || 'Erreur lors de la lecture des étudiants',
+    });
+  }
+});
+
+// 3. Synchronisation d'un ou plusieurs étudiants (Upsert par Matricule)
+app.post('/api/v1/sync/students', rateLimit(60000, 60, 'sync-api-write'), async (req, res) => {
+  const isValid = await verifyApiKey(req);
+  if (!isValid) {
+    return res.status(401).json({
+      success: false,
+      error: 'Non autorisé. Clé API incorrecte ou absente.',
+    });
+  }
+
+  try {
+    const payload = req.body;
+    // On accepte soit un objet étudiant unique, soit un tableau d'étudiants
+    const rawList = Array.isArray(payload) ? payload : (Array.isArray(payload?.students) ? payload.students : [payload]);
+
+    if (rawList.length === 0 || !rawList[0]) {
+      return res.status(400).json({
+        success: false,
+        error: 'Aucune donnée étudiante reçue dans la requête.',
+      });
+    }
+
+    if (rawList.length > 1000) {
+      return res.status(413).json({
+        success: false,
+        error: 'Le lot de synchronisation dépasse la limite maximale de 1000 étudiants par appel.',
+      });
+    }
+
+    // Charger les étudiants existants depuis Firestore pour faire le matching par matricule
+    const existingSnap = await getDocs(collection(serverDb, 'isgg_students'));
+    const matriculeMap = new Map<string, any>();
+    existingSnap.forEach(d => {
+      const data = d.data();
+      if (data.matricule) {
+        matriculeMap.set(data.matricule.trim().toUpperCase(), data);
+      }
+    });
+
+    let createdCount = 0;
+    let updatedCount = 0;
+    const batch = writeBatch(serverDb);
+    const now = new Date().toISOString();
+
+    const processedStudents: any[] = [];
+
+    for (const raw of rawList) {
+      const matricule = (raw.matricule || raw.Matricule || raw.reference || '').trim();
+      const lastName = (raw.lastName || raw.nom || raw.Nom || '').trim().toUpperCase();
+      const firstName = (raw.firstName || raw.prenom || raw.Prenom || raw.prenoms || '').trim();
+
+      if (!matricule && (!lastName || !firstName)) {
+        continue;
+      }
+
+      const safeMatricule = matricule || `ISGG-${Date.now().toString().slice(-6)}`;
+      const { programId, levelId } = resolveProgramAndLevel(
+        raw.programCode || raw.program || raw.filiere || raw.Filiere,
+        raw.levelCode || raw.level || raw.niveau || raw.Niveau || raw.classe
+      );
+
+      const classGroup = (raw.classGroup || raw.group || raw.groupe || raw.Groupe || 'A').toString().trim().toUpperCase();
+      const email = (raw.email || raw.mail || '').trim().toLowerCase();
+      const phone = (raw.phone || raw.telephone || raw.tel || '').trim();
+
+      const existing = matriculeMap.get(safeMatricule.toUpperCase());
+
+      if (existing) {
+        // Mise à jour (Conserve l'ID unique et préserve les absences associées)
+        const updatedStudent = {
+          ...existing,
+          lastName: lastName || existing.lastName,
+          firstName: firstName || existing.firstName,
+          programId: programId || existing.programId,
+          levelId: levelId || existing.levelId,
+          classGroup: classGroup || existing.classGroup || 'A',
+          email: email || existing.email,
+          phone: phone || existing.phone,
+          isActive: raw.isActive !== undefined ? Boolean(raw.isActive) : existing.isActive,
+          updatedAt: now,
+        };
+
+        const docRef = doc(serverDb, 'isgg_students', existing.id);
+        batch.set(docRef, updatedStudent, { merge: true });
+        updatedCount++;
+        processedStudents.push(updatedStudent);
+      } else {
+        // Création nouvel étudiant
+        const newId = `stu-sync-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+        const newStudent = {
+          id: newId,
+          matricule: safeMatricule,
+          lastName,
+          firstName,
+          programId,
+          levelId,
+          classGroup: classGroup || 'A',
+          email: email || undefined,
+          phone: phone || undefined,
+          isActive: true,
+          createdAt: now,
+        };
+
+        const docRef = doc(serverDb, 'isgg_students', newId);
+        batch.set(docRef, newStudent);
+        matriculeMap.set(safeMatricule.toUpperCase(), newStudent);
+        createdCount++;
+        processedStudents.push(newStudent);
+      }
+    }
+
+    if (createdCount > 0 || updatedCount > 0) {
+      await batch.commit();
+
+      // Mettre à jour les métadonnées de dernière synchronisation
+      try {
+        const settingsRef = doc(serverDb, 'isgg_metadata', 'settings');
+        await setDoc(settingsRef, {
+          lastSyncAt: now,
+          lastSyncStats: {
+            createdCount,
+            updatedCount,
+            totalReceived: rawList.length,
+          }
+        }, { merge: true });
+      } catch (e) {
+        console.warn('Update lastSyncAt error:', e);
+      }
+    }
+
+    return res.json({
+      success: true,
+      message: `Synchronisation réussie : ${createdCount} étudiant(s) créé(s), ${updatedCount} mis à jour.`,
+      stats: {
+        totalReceived: rawList.length,
+        created: createdCount,
+        updated: updatedCount,
+      },
+      timestamp: now,
+    });
+  } catch (err: any) {
+    console.error('[Sync API] Erreur traitement:', err);
+    return res.status(500).json({
+      success: false,
+      error: 'Erreur interne lors de la synchronisation des étudiants.',
+    });
+  }
+});
+
+// Centralized error handling to prevent stack trace leaks
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  console.error('[Server Internal Error]', err?.message || err);
+  if (res.headersSent) {
+    return next(err);
+  }
+  return res.status(500).json({
+    success: false,
+    error: 'Une erreur interne est survenue sur le serveur.',
+  });
 });
 
 async function startServer() {

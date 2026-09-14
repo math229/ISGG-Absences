@@ -14,12 +14,11 @@ import {
 
 interface SheetImportHistoryProps {
   imports: SheetImportRecord[];
-  onNewImportClick: () => void;
+  onNewImportClick?: () => void;
 }
 
 export const SheetImportHistory: React.FC<SheetImportHistoryProps> = ({
   imports,
-  onNewImportClick,
 }) => {
   if (imports.length === 0) {
     return (
@@ -28,16 +27,9 @@ export const SheetImportHistory: React.FC<SheetImportHistoryProps> = ({
           <FileSpreadsheet className="w-8 h-8" />
         </div>
         <h3 className="text-lg font-semibold text-slate-800 mb-1">Aucune fiche importée pour le moment</h3>
-        <p className="text-sm text-slate-500 max-w-md mx-auto mb-6">
+        <p className="text-sm text-slate-500 max-w-md mx-auto">
           Toutes les fiches d'absences quotidiennes importées et validées par le surveillant général apparaîtront ici avec leur traçabilité complète.
         </p>
-        <button
-          onClick={onNewImportClick}
-          className="inline-flex items-center gap-2 px-5 py-2.5 bg-orange-600 hover:bg-orange-700 text-white text-sm font-medium rounded-lg shadow-xs transition-colors"
-        >
-          <FileSpreadsheet className="w-4 h-4" />
-          Importer une première fiche
-        </button>
       </div>
     );
   }
@@ -50,16 +42,9 @@ export const SheetImportHistory: React.FC<SheetImportHistoryProps> = ({
             Historique des fiches d'absences traitées ({imports.length})
           </h3>
           <p className="text-xs text-slate-500">
-            Traçabilité des imports de fiches récapitulatives quotidiennes
+            Traçabilité des fiches récapitulatives quotidiennes analysées et validées par la surveillance
           </p>
         </div>
-        <button
-          onClick={onNewImportClick}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white text-xs font-semibold rounded-lg shadow-xs transition-colors"
-        >
-          <FileSpreadsheet className="w-4 h-4" />
-          Nouvel import
-        </button>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">

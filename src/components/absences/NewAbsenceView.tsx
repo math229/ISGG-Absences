@@ -17,7 +17,11 @@ import {
   UserCheck,
   Users,
   FileSpreadsheet,
-  Keyboard
+  Keyboard,
+  AlertTriangle,
+  FileText,
+  Send,
+  X
 } from 'lucide-react';
 import { storage, formatFrenchDate } from '../../lib/storage';
 import { Program, Level, Subject, StudentWithStats } from '../../types';
@@ -71,6 +75,13 @@ export const NewAbsenceView: React.FC<NewAbsenceViewProps> = ({ onViewStudentHis
 
   // Class list mode state
   const [selectedStudentIds, setSelectedStudentIds] = useState<Set<string>>(new Set());
+
+  // Immediate Disciplinary Alert Modal state
+  const [alertStudentInfo, setAlertStudentInfo] = useState<{
+    student: StudentWithStats;
+    count: number;
+    threshold: number;
+  } | null>(null);
 
   // Search input reference for auto-refocus
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -150,15 +161,28 @@ export const NewAbsenceView: React.FC<NewAbsenceViewProps> = ({ onViewStudentHis
         annualCount: result.student.annualAbsenceCount,
       });
 
+      const settings = storage.getSystemSettings();
+
+      // Check if critical disciplinary threshold reached or crossed
+      if (settings.instantAlertOnEntry && result.student.annualAbsenceCount >= settings.disciplineThreshold) {
+        setAlertStudentInfo({
+          student: result.student,
+          count: result.student.annualAbsenceCount,
+          threshold: settings.disciplineThreshold,
+        });
+      }
+
       // 2. Clear state and refocus search input immediately for next student (Step 27)
       setSelectedStudent(null);
       setSearchQuery('');
 
-      setTimeout(() => {
-        if (searchInputRef.current) {
-          searchInputRef.current.focus();
-        }
-      }, 50);
+      if (settings.autoRefocus) {
+        setTimeout(() => {
+          if (searchInputRef.current) {
+            searchInputRef.current.focus();
+          }
+        }, 50);
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Erreur lors de l\'enregistrement';
       showToast(msg, 'error');
@@ -187,6 +211,25 @@ export const NewAbsenceView: React.FC<NewAbsenceViewProps> = ({ onViewStudentHis
       );
 
       setSelectedStudentIds(new Set());
+
+      // Check if any student crossed threshold in bulk mode
+      const settings = storage.getSystemSettings();
+      if (settings.instantAlertOnEntry) {
+        const atRiskStudents: StudentWithStats[] = [];
+        (Array.from(selectedStudentIds) as string[]).forEach((sId: string) => {
+          const stats = storage.getStudentWithStats(sId);
+          if (stats && stats.annualAbsenceCount >= settings.disciplineThreshold) {
+            atRiskStudents.push(stats);
+          }
+        });
+        if (atRiskStudents.length > 0) {
+          setAlertStudentInfo({
+            student: atRiskStudents[0],
+            count: atRiskStudents[0].annualAbsenceCount,
+            threshold: settings.disciplineThreshold,
+          });
+        }
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Erreur';
       showToast(msg, 'error');
@@ -243,12 +286,7 @@ export const NewAbsenceView: React.FC<NewAbsenceViewProps> = ({ onViewStudentHis
             }`}
           >
             <FileSpreadsheet className="w-4 h-4 shrink-0" />
-            <span className="hidden xs:inline">Importer</span>
-            <span className="inline xs:hidden">Fiche</span>
-            <span className="hidden md:inline"> une fiche</span>
-            <span className="hidden sm:inline-block ml-1 px-1.5 py-0.2 rounded-full text-[10px] bg-orange-100 text-orange-700">
-              Prioritaire
-            </span>
+            <span>Fiche</span>
           </button>
 
           <button
@@ -296,7 +334,6 @@ export const NewAbsenceView: React.FC<NewAbsenceViewProps> = ({ onViewStudentHis
       {mainTab === 'history' && (
         <SheetImportHistory
           imports={sheetImports}
-          onNewImportClick={() => setMainTab('import')}
         />
       )}
 
@@ -892,6 +929,105 @@ export const NewAbsenceView: React.FC<NewAbsenceViewProps> = ({ onViewStudentHis
         </div>
       </div>
     </div>
+    )}
+
+    {/* Instant Disciplinary Alert Modal (Direct feedback when threshold is reached) */}
+    {alertStudentInfo && (
+      <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+        <div className="bg-white rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl border border-rose-200 animate-in zoom-in-95 duration-200 space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-rose-100 rounded-2xl">
+                <AlertTriangle className="w-7 h-7 text-rose-600" />
+              </div>
+              <div>
+                <span className="text-[11px] font-black uppercase tracking-wider text-rose-700 bg-rose-100/80 px-2 py-0.5 rounded-md">
+                  Palier Disciplinaire Dépassé
+                </span>
+                <h3 className="text-lg font-black text-slate-900 mt-0.5">
+                  Convocation obligatoire
+                </h3>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setAlertStudentInfo(null)}
+              className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          <p className="text-xs sm:text-sm text-slate-700 font-medium leading-relaxed">
+            L&apos;étudiant <strong className="text-slate-950 uppercase">{alertStudentInfo.student.lastName} {alertStudentInfo.student.firstName}</strong> ({alertStudentInfo.student.matricule}) vient d&apos;atteindre <strong className="text-rose-600 font-black">{alertStudentInfo.count} absences</strong> cumulées.
+          </p>
+
+          <div className="bg-orange-50/70 border border-orange-200 rounded-2xl p-4 space-y-2 text-xs">
+            <p className="font-bold text-orange-950 flex items-center gap-1.5">
+              <FileText className="w-4 h-4 text-[#EA580C]" />
+              Conséquences réglementaires ISGG :
+            </p>
+            <ul className="list-disc list-inside space-y-1 text-orange-900 font-medium">
+              <li>Seuil de convocation fixé à <strong>{alertStudentInfo.threshold} absences</strong> dépassé</li>
+              <li>Avis transmis au dossier officiel de la Direction</li>
+              <li>Disqualification possible aux examens finaux</li>
+            </ul>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex flex-col sm:flex-row gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                const settings = storage.getSystemSettings();
+                const msg = settings.parentNoticeTemplate
+                  .replace('{etudiant}', `${alertStudentInfo.student.lastName.toUpperCase()} ${alertStudentInfo.student.firstName}`)
+                  .replace('{classe}', alertStudentInfo.student.programName ? `${alertStudentInfo.student.programName}` : 'ISGG')
+                  .replace('{absences}', String(alertStudentInfo.count))
+                  .replace('{date_rdv}', 'ce vendredi à 09h00')
+                  .replace('{tuteur}', `M./Mme ${alertStudentInfo.student.lastName.toUpperCase()}`);
+                
+                if (navigator.clipboard) {
+                  navigator.clipboard.writeText(msg);
+                  showToast('Message de notification copié dans le presse-papier !', 'success');
+                }
+                
+                if (settings.parentNotificationChannel === 'WHATSAPP') {
+                  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+                } else if (settings.parentNotificationChannel === 'SMS') {
+                  window.open(`sms:?body=${encodeURIComponent(msg)}`, '_blank');
+                } else if (settings.parentNotificationChannel === 'EMAIL') {
+                  window.open(`mailto:?subject=${encodeURIComponent('ISGG - Avis d\'assiduité et convocation')}&body=${encodeURIComponent(msg)}`, '_blank');
+                }
+              }}
+              className="flex-1 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-emerald-600/20"
+            >
+              <Send className="w-4 h-4" />
+              <span>Avis Parents ({storage.getSystemSettings().parentNotificationChannel})</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const sId = alertStudentInfo.student.id;
+                setAlertStudentInfo(null);
+                onViewStudentHistory(sId);
+              }}
+              className="px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 font-bold text-xs flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <span>Fiche Étudiant</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setAlertStudentInfo(null)}
+              className="px-4 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs cursor-pointer"
+            >
+              <span>Continuer la saisie</span>
+            </button>
+          </div>
+        </div>
+      </div>
     )}
   </div>
   );

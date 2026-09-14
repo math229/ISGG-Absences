@@ -34,7 +34,6 @@ import {
   PotentialStudentMatch 
 } from '../../types';
 import { 
-  OFFICIAL_ISGG_SAMPLE_SHEET, 
   matchExtractedDataAgainstStorage, 
   parseUploadedAttendanceSheet 
 } from '../../lib/sheetParser';
@@ -159,15 +158,6 @@ export const SheetImporter: React.FC<SheetImporterProps> = ({
     if (!selectedFile) return;
     runAnalysis(async () => {
       return await parseUploadedAttendanceSheet(selectedFile);
-    });
-  };
-
-  // Quick action: Test with the official 09/09/2026 sheet
-  const handleLoadOfficialSample = () => {
-    runAnalysis(async () => {
-      await new Promise(r => setTimeout(r, 300));
-      const sample = JSON.parse(JSON.stringify(OFFICIAL_ISGG_SAMPLE_SHEET)) as ParsedSheetData;
-      return matchExtractedDataAgainstStorage(sample);
     });
   };
 
@@ -540,15 +530,6 @@ export const SheetImporter: React.FC<SheetImporterProps> = ({
               >
                 <UploadCloud className="w-4 h-4" />
                 {selectedFile ? 'Analyser cette fiche' : 'Sélectionner un fichier'}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleLoadOfficialSample}
-                className="w-full sm:w-auto px-5 py-2.5 bg-white hover:bg-slate-100 text-slate-700 text-sm font-semibold rounded-lg border border-slate-300 shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <FileSpreadsheet className="w-4 h-4 text-orange-600" />
-                Tester avec la fiche du 09/09/2026
               </button>
             </div>
           </div>

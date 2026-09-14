@@ -196,3 +196,53 @@ export interface NotificationItem {
   read: boolean;
   type: 'info' | 'warning' | 'success';
 }
+
+export interface SystemSettings {
+  // Paliers d'assiduité & de discipline
+  warningThreshold: number; // Palier 1: Avertissement préventif (default: 3)
+  disciplineThreshold: number; // Palier 2: Seuil disciplinaire critique & convocation (default: 5)
+  examExclusionLimit: number; // Palier 3: Seuil d'absences par matière avant exclusion d'examen (default: 2)
+
+  // Automatismes
+  autoConvocationNotice: boolean; // Générer un avis de convocation automatique lors du franchissement
+  instantAlertOnEntry: boolean; // Alerte immédiate visuelle en direct lors de la saisie
+  autoRefocus: boolean; // Refocus rapide du champ de recherche après enregistrement
+
+  // Modèle de notification tuteurs & parents
+  parentNotificationChannel: 'WHATSAPP' | 'SMS' | 'EMAIL';
+  parentNoticeTemplate: string; // Modèle de message pré-rempli
+
+  // Intégration & API Synchronisation ISGG
+  syncApiKey?: string;
+  lastSyncAt?: string;
+  lastSyncStats?: {
+    createdCount: number;
+    updatedCount: number;
+    totalReceived: number;
+  };
+
+  updatedAt?: string;
+}
+
+export const DEFAULT_SYSTEM_SETTINGS: SystemSettings = {
+  warningThreshold: 3,
+  disciplineThreshold: 5,
+  examExclusionLimit: 2,
+  autoConvocationNotice: true,
+  instantAlertOnEntry: true,
+  autoRefocus: true,
+  parentNotificationChannel: 'WHATSAPP',
+  parentNoticeTemplate: "Bonjour, l'Institut Supérieur ISGG vous informe que l'étudiant(e) {etudiant} ({classe}) totalise {absences} absences non justifiées (seuil de {seuil} dépassé). Une convocation disciplinaire est établie auprès de la Direction des Études. Rigueur & Excellence.",
+  syncApiKey: 'isgg_live_key_9482f5b8e1',
+};
+
+export type ConvocationStatus = 'a_convoquer' | 'envoyee' | 'en_attente' | 'traite';
+
+export interface ConvocationRecord {
+  studentId: string;
+  status: ConvocationStatus;
+  updatedAt: string;
+  updatedBy?: string;
+  note?: string; // ex: "Père venu le 14/09, engagement d'assiduité signé"
+  meetingDate?: string;
+}

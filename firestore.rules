@@ -1,8 +1,111 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Default-deny all undefined paths
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    // Students collection
+    match /isgg_students/{studentId} {
+      allow read: if true;
+      allow write: if isValidId(studentId) 
+        && incoming().matricule is string 
+        && incoming().matricule.size() <= 64
+        && incoming().firstName is string 
+        && incoming().firstName.size() <= 120
+        && incoming().lastName is string
+        && incoming().lastName.size() <= 120;
+    }
+
+    // Absences collection
+    match /isgg_absences/{absenceId} {
+      allow read: if true;
+      allow write: if isValidId(absenceId)
+        && incoming().studentId is string
+        && incoming().studentId.size() <= 128
+        && incoming().absenceDate is string
+        && incoming().absenceDate.size() <= 32;
+    }
+
+    // Programs & Levels
+    match /isgg_programs/{programId} {
+      allow read: if true;
+      allow write: if isValidId(programId) 
+        && incoming().code is string 
+        && incoming().code.size() <= 32
+        && incoming().name is string;
+    }
+
+    match /isgg_levels/{levelId} {
+      allow read: if true;
+      allow write: if isValidId(levelId) 
+        && incoming().code is string 
+        && incoming().name is string;
+    }
+
+    // Course Subjects
+    match /isgg_subjects/{subjectId} {
+      allow read: if true;
+      allow write: if isValidId(subjectId) 
+        && incoming().name is string 
+        && incoming().name.size() <= 200;
+    }
+
+    // Users and Staff directory
+    match /isgg_users/{userId} {
+      allow read: if true;
+      allow create, update: if isValidId(userId)
+        && incoming().email is string
+        && incoming().email.size() <= 150
+        && incoming().name is string
+        && incoming().name.size() <= 150
+        && incoming().role in ['ADMIN', 'SURVEILLANT', 'TEACHER', 'STUDENT'];
+      allow delete: if false;
+    }
+
+    // System notifications and alerts
+    match /isgg_notifications/{notifId} {
+      allow read: if true;
+      allow write: if isValidId(notifId)
+        && incoming().title is string
+        && incoming().title.size() <= 200;
+    }
+
+    // Convocations
+    match /isgg_convocations/{convocId} {
+      allow read: if true;
+      allow write: if isValidId(convocId)
+        && incoming().studentId is string;
+    }
+
+    // Import logs and history
+    match /isgg_sheet_imports/{importId} {
+      allow read: if true;
+      allow write: if isValidId(importId);
+    }
+
+    // Security codes & Configuration
+    match /isgg_security_codes/{codeId} {
+      allow read, write: if isValidId(codeId);
+    }
+
+    match /isgg_system_settings/{settingId} {
+      allow read, write: if isValidId(settingId);
+    }
+
+    match /isgg_metadata/{metaId} {
+      allow read, write: if isValidId(metaId);
     }
   }
 }
+

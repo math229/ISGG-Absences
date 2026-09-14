@@ -10,7 +10,6 @@ import {
   CheckCircle2,
   AlertTriangle,
   Info,
-  Menu,
   Check,
   Cloud,
   CloudOff,
@@ -102,17 +101,8 @@ export const Header: React.FC<HeaderProps> = ({
 
   return (
     <header className="h-16 bg-white border-b border-slate-200/80 px-3 sm:px-6 lg:px-8 flex items-center justify-between sticky top-0 z-30 shadow-xs">
-      {/* Left: Mobile hamburger + Quick Date & Academic Year Indicator */}
+      {/* Left: Brand Identity & Academic Year Indicator */}
       <div className="flex items-center gap-2.5 sm:gap-4 text-xs">
-        {onOpenMobileMenu && (
-          <button
-            onClick={onOpenMobileMenu}
-            className="lg:hidden p-2 -ml-1 text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-xl transition-colors flex items-center justify-center min-w-[40px] min-h-[40px]"
-            aria-label="Ouvrir le menu de navigation"
-          >
-            <Menu className="w-5 h-5 text-slate-700" />
-          </button>
-        )}
         <div className="flex items-center gap-2 lg:hidden">
           <span className="font-extrabold text-sm tracking-tight text-slate-900 flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 rounded-full bg-[#EA580C]" />

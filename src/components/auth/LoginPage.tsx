@@ -731,7 +731,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
                     required
                     value={regName}
                     onChange={e => setRegName(e.target.value)}
-                    placeholder="ex: Dr. Koffi Mensah ou M. Amadou Diallo"
+                    placeholder="ex: Prénom et Nom de l'agent"
                     className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#EA580C]/20 focus:border-[#EA580C] focus:bg-white transition-all"
                   />
                 </div>

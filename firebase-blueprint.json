@@ -1,69 +1,90 @@
 {
   "entities": {
+    "isgg_students": {
+      "title": "ISGG Student",
+      "description": "Student profile and enrollment record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "matricule": { "type": "string", "maxLength": 64 },
+        "firstName": { "type": "string", "maxLength": 120 },
+        "lastName": { "type": "string", "maxLength": 120 },
+        "programId": { "type": "string" },
+        "levelId": { "type": "string" },
+        "classGroup": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "parentPhone": { "type": "string" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["id", "matricule", "firstName", "lastName", "programId", "levelId"]
+    },
     "isgg_absences": {
-      "title": "ISGG Absence Records",
-      "description": "Student absence tracking records",
+      "title": "ISGG Absence",
+      "description": "Individual student absence record",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "studentId": { "type": "string" },
         "subjectId": { "type": "string" },
-        "date": { "type": "string" },
-        "timeSlot": { "type": "string" },
-        "reason": { "type": "string" },
+        "absenceDate": { "type": "string" },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "timeRange": { "type": "string" },
         "justified": { "type": "boolean" },
-        "justificationReason": { "type": "string" },
-        "justificationDate": { "type": "string" },
-        "recordedBy": { "type": "string" },
-        "recordedAt": { "type": "string" }
+        "recordedBy": { "type": "string" }
       },
-      "required": ["id", "studentId", "subjectId", "date", "timeSlot", "justified", "recordedBy", "recordedAt"]
-    },
-    "isgg_students": {
-      "title": "ISGG Student",
-      "description": "Student profile and enrollment",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "matricule": { "type": "string" },
-        "firstName": { "type": "string" },
-        "lastName": { "type": "string" },
-        "programId": { "type": "string" },
-        "level": { "type": "string" },
-        "email": { "type": "string" },
-        "phone": { "type": "string" },
-        "parentPhone": { "type": "string" },
-        "avatarUrl": { "type": "string" }
-      },
-      "required": ["id", "matricule", "firstName", "lastName", "programId", "level"]
-    },
-    "isgg_subjects": {
-      "title": "ISGG Subject",
-      "description": "Academic course subject",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "code": { "type": "string" },
-        "name": { "type": "string" },
-        "programId": { "type": "string" },
-        "teacher": { "type": "string" },
-        "totalHours": { "type": "number" },
-        "credits": { "type": "number" }
-      },
-      "required": ["id", "code", "name", "programId", "teacher"]
+      "required": ["id", "studentId", "subjectId", "absenceDate"]
     },
     "isgg_programs": {
       "title": "ISGG Program",
-      "description": "Academic departments/programs",
+      "description": "Academic study department",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string", "maxLength": 32 },
+        "name": { "type": "string" },
+        "availableGroups": { "type": "array" }
+      },
+      "required": ["id", "code", "name"]
+    },
+    "isgg_levels": {
+      "title": "ISGG Level",
+      "description": "Study year level (L1, L2, L3)",
       "type": "object",
       "properties": {
         "id": { "type": "string" },
         "code": { "type": "string" },
-        "name": { "type": "string" },
-        "description": { "type": "string" },
-        "headOfDepartment": { "type": "string" }
+        "name": { "type": "string" }
       },
       "required": ["id", "code", "name"]
+    },
+    "isgg_subjects": {
+      "title": "ISGG Subject",
+      "description": "Course subject",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "name": { "type": "string", "maxLength": 200 },
+        "programId": { "type": "string" },
+        "levelId": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "isgg_users": {
+      "title": "ISGG User",
+      "description": "Staff account with role and credentials",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 150 },
+        "email": { "type": "string", "maxLength": 150 },
+        "role": { "type": "string", "enum": ["ADMIN", "SURVEILLANT", "TEACHER", "STUDENT"] },
+        "title": { "type": "string" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["id", "name", "email", "role"]
     },
     "isgg_notifications": {
       "title": "ISGG Notification",
@@ -71,81 +92,53 @@
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "title": { "type": "string" },
-        "description": { "type": "string" },
-        "time": { "type": "string" },
-        "read": { "type": "boolean" },
-        "type": { "type": "string" }
+        "title": { "type": "string", "maxLength": 200 },
+        "message": { "type": "string" },
+        "createdAt": { "type": "string" }
       },
-      "required": ["id", "title", "description", "read"]
+      "required": ["id", "title"]
     },
     "isgg_metadata": {
-      "title": "ISGG System Metadata",
-      "description": "School year and shared config",
+      "title": "ISGG Metadata",
+      "description": "System configuration and academic year details",
       "type": "object",
       "properties": {
-        "activeSchoolYear": { "type": "object" },
         "updatedAt": { "type": "string" }
       }
-    },
-    "isgg_users": {
-      "title": "ISGG Users",
-      "description": "Surveillants and Administrative Directors",
-      "type": "object",
-      "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "email": { "type": "string" },
-        "role": { "type": "string" },
-        "title": { "type": "string" },
-        "avatarUrl": { "type": "string" },
-        "lastLogin": { "type": "string" }
-      },
-      "required": ["id", "name", "email", "role"]
     }
   },
   "firestore": {
-    "isgg_users": {
-      "rules": {
-        "read": "true",
-        "write": "true"
-      }
+    "/isgg_students/{studentId}": {
+      "schema": "isgg_students",
+      "description": "Enrolled student profiles"
     },
-    "isgg_absences": {
-      "rules": {
-        "read": "true",
-        "write": "true"
-      }
+    "/isgg_absences/{absenceId}": {
+      "schema": "isgg_absences",
+      "description": "Academic absence events"
     },
-    "isgg_students": {
-      "rules": {
-        "read": "true",
-        "write": "true"
-      }
+    "/isgg_programs/{programId}": {
+      "schema": "isgg_programs",
+      "description": "Degree programs"
     },
-    "isgg_subjects": {
-      "rules": {
-        "read": "true",
-        "write": "true"
-      }
+    "/isgg_levels/{levelId}": {
+      "schema": "isgg_levels",
+      "description": "Year levels"
     },
-    "isgg_programs": {
-      "rules": {
-        "read": "true",
-        "write": "true"
-      }
+    "/isgg_subjects/{subjectId}": {
+      "schema": "isgg_subjects",
+      "description": "Course subjects"
     },
-    "isgg_notifications": {
-      "rules": {
-        "read": "true",
-        "write": "true"
-      }
+    "/isgg_users/{userId}": {
+      "schema": "isgg_users",
+      "description": "Authorized staff accounts"
     },
-    "isgg_metadata": {
-      "rules": {
-        "read": "true",
-        "write": "true"
-      }
+    "/isgg_notifications/{notifId}": {
+      "schema": "isgg_notifications",
+      "description": "Alerts and notices"
+    },
+    "/isgg_metadata/{metaId}": {
+      "schema": "isgg_metadata",
+      "description": "Application state metadata"
     }
   }
 }

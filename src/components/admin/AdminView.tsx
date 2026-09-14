@@ -26,6 +26,8 @@ import { storage } from '../../lib/storage';
 import { rateLimiter } from '../../lib/rateLimiter';
 import { User, Program, Subject, Level } from '../../types';
 import { useToast } from '../common/Toast';
+import { IntegrationHubTab } from './IntegrationHubTab';
+import { Network } from 'lucide-react';
 
 interface AdminViewProps {
   currentUser: User;
@@ -33,7 +35,7 @@ interface AdminViewProps {
 
 export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
   const { showToast } = useToast();
-  const [activeTab, setActiveTab] = useState<'students' | 'programs' | 'subjects' | 'users' | 'school-year'>('students');
+  const [activeTab, setActiveTab] = useState<'students' | 'integration' | 'programs' | 'subjects' | 'users' | 'school-year'>('students');
 
   // Programs & Levels
   const [programs, setPrograms] = useState<Program[]>(storage.getAllPrograms());
@@ -150,7 +152,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
           onClick={() => storage.switchRole('ADMIN')}
           className="px-5 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-md transition-colors cursor-pointer"
         >
-          Basculer en profil Administrateur (Dr. K. Mensah)
+          Basculer en profil Administrateur
         </button>
       </div>
     );
@@ -298,6 +300,19 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
         >
           <Users className="w-4 h-4" />
           <span>Gestion des Étudiants</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('integration')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
+            activeTab === 'integration' ? 'bg-[#EA580C] text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Network className="w-4 h-4" />
+          <span className="flex items-center gap-1.5">
+            <span>Intégration & API</span>
+            <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+          </span>
         </button>
 
         <button
@@ -544,15 +559,21 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
 
           {/* Quick instructions for import */}
           <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-600 flex items-center justify-between">
-            <span>Importation massive d&apos;effectifs étudiants disponible au format CSV / Excel standard ISGG.</span>
+            <span>Importation massive ou synchronisation automatique avec le logiciel de l&apos;école disponible.</span>
             <button
-              onClick={() => showToast('Gabarit CSV téléchargé (Exemple disponible dans la documentation)', 'info')}
-              className="font-bold text-[#EA580C] hover:underline"
+              onClick={() => setActiveTab('integration')}
+              className="font-bold text-[#EA580C] hover:underline cursor-pointer flex items-center gap-1"
             >
-              Télécharger gabarit
+              <span>Accéder au Connecteur & API</span>
+              <span>→</span>
             </button>
           </div>
         </div>
+      )}
+
+      {/* TAB INTÉGRATION & API (LE PONT INVISIBLE) */}
+      {activeTab === 'integration' && (
+        <IntegrationHubTab />
       )}
 
       {/* TAB 2: FILIÈRES */}
