@@ -551,50 +551,291 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onNavigateToStudent })
     showToast('Rapport CSV téléchargé avec succès', 'success');
   };
 
-  interface ExportPageData {
+  interface PaginatedReportPage {
     isFirstPage: boolean;
-    headerNode: HTMLElement;
-    blocks: HTMLElement[];
+    contentHtml: string;
     hasSignature: boolean;
   }
 
+  // Pure HTML Templating & Unified A4 Pagination Engine (Modeled after StudentProfileModal)
+  const getOfficialReportHeaderHtml = (isFirstPage: boolean) => {
+    if (isFirstPage) {
+      return `
+        <div>
+          <!-- En-tête officiel ISGG -->
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 8px; border-bottom: 2px solid #0f172a;">
+            <div style="display: flex; flex-direction: column; align-items: center;">
+              <img src="${ISGG_LOGO_DATA_URL}" alt="Logo ISGG" style="height: 52px; width: auto; object-fit: contain;" />
+              <span style="font-size: 10px; font-style: italic; font-family: serif; color: #1e293b; margin-top: 2px;">
+                Les vertus de la réussite
+              </span>
+            </div>
+            <div style="text-align: right; max-width: 480px;">
+              <h1 style="font-size: 13px; font-weight: 900; text-transform: uppercase; font-family: serif; margin: 0; color: #020617; line-height: 1.2;">
+                INSTITUT SUPERIEUR DE GENIE CIVIL ET DE GESTION
+              </h1>
+              <div style="margin-top: 4px; padding: 4px 6px; border: 1px solid #cbd5e1; border-radius: 4px; background: #f8fafc; font-size: 7.5px; line-height: 1.2; text-align: left;">
+                <p style="font-weight: bold; margin: 0 0 2px 0;">Autorisations de l'État :</p>
+                <p style="margin: 0;">• Avis favorable CNE N°2021-0281/CNE/PCQR/SE</p>
+                <p style="margin: 0;">• Notification DGES N°2308/MESRS/DC/SGM/DGES/SA</p>
+                <p style="margin: 0;">• Arrêté MESRS N°0272/MESRS/DC/SGM/DGES/CTJ/CJSA/021 S0022</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Titre officiel encadré -->
+          <div style="border: 2px solid #000; padding: 6px 12px; text-align: center; margin: 10px 0 12px 0; background: #ffffff;">
+            <h2 style="font-size: 12px; font-weight: 900; text-transform: uppercase; margin: 0; letter-spacing: 0.5px; color: #000;">
+              ${formattedOfficialTitle}
+            </h2>
+          </div>
+        </div>
+      `;
+    }
+
+    return `
+      <div style="display: flex; justify-content: space-between; align-items: center; padding-bottom: 6px; margin-bottom: 10px; border-bottom: 2px solid #0f172a; font-family: system-ui, sans-serif;">
+        <span style="font-size: 11px; font-weight: 900; text-transform: uppercase; color: #000;">
+          INSTITUT SUPERIEUR DE GENIE CIVIL ET DE GESTION (ISGG)
+        </span>
+        <span style="font-size: 9px; font-weight: bold; color: #475569; font-style: italic;">
+          ${formattedOfficialTitle} — (Suite)
+        </span>
+      </div>
+    `;
+  };
+
+  const getOfficialReportSignatureHtml = () => {
+    const reportDateStr = formatFrenchDate(
+      reportType === 'daily'
+        ? dailyDate
+        : reportType === 'weekly'
+        ? weeklyEndDate
+        : reportType === 'monthly'
+        ? `${monthlyYearMonth}-28`
+        : examEndDate
+    );
+
+    return `
+      <div style="display: flex; justify-content: flex-end; margin-top: 14px; break-inside: avoid; page-break-inside: avoid;">
+        <div style="width: 280px; text-align: center;">
+          <p style="font-size: 9.5px; font-weight: bold; margin: 0; color: #000;">
+            Fait à Calavi, le ${reportDateStr}
+          </p>
+          <p style="font-size: 9.5px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; margin: 2px 0 0 0; color: #000;">
+            Le Surveillant Général
+          </p>
+          <div style="height: 48px;"></div>
+          <p style="font-size: 10.5px; font-weight: 900; text-transform: uppercase; text-decoration: underline; margin: 0; color: #020617;">
+            ${surveillantName || 'Le Surveillant Général'}
+          </p>
+        </div>
+      </div>
+    `;
+  };
+
+  const getOfficialReportFooterHtml = (pageNum: number, totalPages: number) => {
+    return `
+      <div class="print-page-footer" style="margin-top: auto !important; padding-top: 6px; border-top: 2px solid #ea580c; font-size: 8px; line-height: 1.25; text-align: center; color: #334155; width: 100%;">
+        <div style="display: flex; justify-content: space-between; font-size: 8.5px; font-weight: bold; color: #64748b; margin-bottom: 2px; border-bottom: 1px solid #e2e8f0; padding-bottom: 2px;">
+          <span>Institut Supérieur de Génie Civil et de Gestion (ISGG)</span>
+          <span>Page ${pageNum} / ${totalPages}</span>
+        </div>
+        <p style="margin: 0; font-weight: 500;">
+          Siège : Ab-Calavi, Aganmandin, Immeuble BOA, 1er et 2ème étages, BP : 1938 Abomey-Calavi
+        </p>
+        <p style="margin: 1px 0 0 0; font-weight: bold; color: #0f172a;">
+          E-mail : isgg229@gmail.com - IFU : 3202346783540 - Tel. : 97 00 67 67 / 94 00 40 40
+        </p>
+      </div>
+    `;
+  };
+
+  // Generates clean HTML blocks for the report content
+  const generateReportHtmlBlocks = (): string[] => {
+    const blocks: string[] = [];
+
+    if (reportType === 'exam-exclusion') {
+      // Header for Exam Disqualification
+      const examHeader = `
+        <div style="text-align: center; font-weight: bold; font-size: 10px; color: #000; padding: 4px 0 6px 0; border-bottom: 1px dashed #cbd5e1; margin-bottom: 8px; display: flex; justify-content: center; gap: 24px; flex-wrap: wrap;">
+          <div><span style="text-decoration: underline;">Classe</span> : <strong style="text-transform: uppercase;">${computedExamClassName}</strong></div>
+          <div><span style="text-decoration: underline;">EXAMEN DE</span> : <strong style="text-transform: uppercase;">${currentExamSubject?.name || 'Matière'}</strong></div>
+          <div><span style="text-decoration: underline;">Horaire</span> : <strong>${examTime}</strong></div>
+        </div>
+      `;
+
+      const disqualified = examCohortEligibility.disqualified;
+      if (disqualified.length === 0) {
+        blocks.push(`
+          ${examHeader}
+          <div style="border: 1px solid #000; padding: 20px; text-align: center; color: #065f46; font-size: 11px; font-weight: bold;">
+            Aucun étudiant exclu. Tous les inscrits de la classe sont autorisés à composer (${examCohortEligibility.qualified.length} étudiants éligibles).
+          </div>
+        `);
+      } else {
+        // Chunk table into rows to prevent page overflows
+        const ROWS_PER_BLOCK = 18;
+        for (let i = 0; i < disqualified.length; i += ROWS_PER_BLOCK) {
+          const chunk = disqualified.slice(i, i + ROWS_PER_BLOCK);
+          const isFirstChunk = i === 0;
+
+          blocks.push(`
+            ${isFirstChunk ? examHeader : ''}
+            <table style="width: 100%; border-collapse: collapse; border: 1px solid #000; font-size: 9.5px; line-height: 1.25; margin-bottom: 8px;">
+              <thead>
+                <tr style="background: #f1f5f9;">
+                  <th style="border: 1px solid #000; padding: 4px 6px; width: 36px; text-align: center; font-weight: 900;">N°</th>
+                  <th style="border: 1px solid #000; padding: 4px 6px; text-align: left; font-weight: 900;">Nom et Prénoms</th>
+                  <th style="border: 1px solid #000; padding: 4px 6px; width: 170px; text-align: center; font-weight: 900;">Observations</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${chunk.map((item, idx) => `
+                  <tr>
+                    <td style="border: 1px solid #000; padding: 4px 6px; text-align: center; font-weight: bold;">${i + idx + 1}</td>
+                    <td style="border: 1px solid #000; padding: 4px 6px; font-weight: 900; text-transform: uppercase;">
+                      ${item.student.lastName} ${item.student.firstName}
+                    </td>
+                    <td style="border: 1px solid #000; padding: 4px 6px; text-align: center;">
+                      Absences au cours
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          `);
+        }
+      }
+      return blocks;
+    }
+
+    if (reportType === 'daily' || reportType === 'weekly' || reportType === 'monthly') {
+      if (groupedSessions.length === 0) {
+        blocks.push(`
+          <div style="border: 1px solid #000; padding: 24px; text-align: center; color: #475569; font-style: italic; font-size: 11px;">
+            Aucun absent enregistré pour les cours de cette sélection.
+          </div>
+        `);
+        return blocks;
+      }
+
+      groupedSessions.forEach(session => {
+        const sessionMetaHtml = `
+          <div style="font-weight: bold; font-size: 10px; color: #000; padding-top: 4px; margin-bottom: 3px; display: flex; gap: 16px; flex-wrap: wrap;">
+            <div><span style="text-decoration: underline;">Classe</span> : <strong style="text-transform: uppercase;">${session.className}</strong></div>
+            <div><span style="text-decoration: underline;">Matière</span> : <strong style="text-transform: uppercase;">${session.subjectName}</strong></div>
+            <div><span style="text-decoration: underline;">Horaire</span> : <strong>${session.timeRange}</strong></div>
+            ${reportType !== 'daily' ? `<div><span style="text-decoration: underline;">Date</span> : <strong>${session.dateStr}</strong></div>` : ''}
+          </div>
+        `;
+
+        const ROWS_PER_SESSION_BLOCK = 14;
+        for (let i = 0; i < session.items.length; i += ROWS_PER_SESSION_BLOCK) {
+          const chunk = session.items.slice(i, i + ROWS_PER_SESSION_BLOCK);
+          const isFirstChunk = i === 0;
+
+          blocks.push(`
+            <div style="margin-bottom: 8px;">
+              ${isFirstChunk ? sessionMetaHtml : `<div style="font-size: 8.5px; font-weight: bold; color: #64748b; margin-bottom: 2px;">${session.className} — ${session.subjectName} (Suite)</div>`}
+              <table style="width: 100%; border-collapse: collapse; border: 1px solid #000; font-size: 9.5px; line-height: 1.25;">
+                <thead>
+                  <tr style="background: #f1f5f9;">
+                    <th style="border: 1px solid #000; padding: 4px 6px; width: 36px; text-align: center; font-weight: 900;">N°</th>
+                    <th style="border: 1px solid #000; padding: 4px 6px; text-align: center; font-weight: 900;">Nom</th>
+                    <th style="border: 1px solid #000; padding: 4px 6px; text-align: center; font-weight: 900;">Prénoms</th>
+                    <th style="border: 1px solid #000; padding: 4px 6px; width: 170px; text-align: center; font-weight: 900;">Observations</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${chunk.map((item, idx) => `
+                    <tr>
+                      <td style="border: 1px solid #000; padding: 3px 5px; text-align: center; font-weight: bold;">${i + idx + 1}</td>
+                      <td style="border: 1px solid #000; padding: 3px 5px; text-align: center; font-weight: 900; text-transform: uppercase;">
+                        ${item.lastName}
+                      </td>
+                      <td style="border: 1px solid #000; padding: 3px 5px; text-align: center;">
+                        ${item.firstName}
+                      </td>
+                      <td style="border: 1px solid #000; padding: 3px 5px; text-align: center;">
+                        ${item.observations}
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          `);
+        }
+      });
+      return blocks;
+    }
+
+    // Branch: Discipline Alerts
+    if (displayedDisciplineStudents.length === 0) {
+      blocks.push(`
+        <div style="border: 1px solid #000; padding: 24px; text-align: center; color: #475569; font-style: italic; font-size: 11px;">
+          Aucun étudiant dans cette catégorie d'alerte.
+        </div>
+      `);
+      return blocks;
+    }
+
+    const ROWS_PER_DISCIPLINE_BLOCK = 16;
+    for (let i = 0; i < displayedDisciplineStudents.length; i += ROWS_PER_DISCIPLINE_BLOCK) {
+      const chunk = displayedDisciplineStudents.slice(i, i + ROWS_PER_DISCIPLINE_BLOCK);
+
+      blocks.push(`
+        <div style="margin-bottom: 8px;">
+          <table style="width: 100%; border-collapse: collapse; border: 1px solid #000; font-size: 9px; line-height: 1.25;">
+            <thead>
+              <tr style="background: #f1f5f9;">
+                <th style="border: 1px solid #000; padding: 4px 5px; width: 32px; text-align: center; font-weight: 900;">N°</th>
+                <th style="border: 1px solid #000; padding: 4px 5px; width: 75px; text-align: left; font-weight: 900;">Matricule</th>
+                <th style="border: 1px solid #000; padding: 4px 5px; text-align: left; font-weight: 900;">Nom et Prénoms</th>
+                <th style="border: 1px solid #000; padding: 4px 5px; text-align: left; font-weight: 900;">Filière / Niveau</th>
+                <th style="border: 1px solid #000; padding: 4px 5px; width: 85px; text-align: center; font-weight: 900;">Total Absences</th>
+                <th style="border: 1px solid #000; padding: 4px 5px; width: 140px; text-align: center; font-weight: 900;">Palier / Décision</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${chunk.map((s, idx) => {
+                const isCritical = s.annualAbsenceCount >= systemSettings.disciplineThreshold;
+                return `
+                  <tr>
+                    <td style="border: 1px solid #000; padding: 3px 5px; text-align: center; font-weight: bold;">${i + idx + 1}</td>
+                    <td style="border: 1px solid #000; padding: 3px 5px; font-family: monospace; font-weight: bold;">${s.matricule}</td>
+                    <td style="border: 1px solid #000; padding: 3px 5px; font-weight: 900; text-transform: uppercase;">${s.lastName} ${s.firstName}</td>
+                    <td style="border: 1px solid #000; padding: 3px 5px;">${s.programName} (${cleanLevelName(s.levelName)})</td>
+                    <td style="border: 1px solid #000; padding: 3px 5px; text-align: center; font-weight: 900; color: #b91c1c;">
+                      ${s.annualAbsenceCount} absences
+                    </td>
+                    <td style="border: 1px solid #000; padding: 3px 5px; text-align: center; font-weight: 900; text-transform: uppercase; ${isCritical ? 'color: #b91c1c;' : 'color: #b45309;'}">
+                      ${isCritical ? 'Convocation officielle' : 'Avertissement préventif'}
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `);
+    }
+
+    return blocks;
+  };
+
   // Unified A4 Pagination Engine: shared between PDF export and physical printing
-  const paginateReportDocument = (element: HTMLElement) => {
-    // Standard A4 dimensions in px (800px width reference at 96dpi => 1131px height)
+  const paginateReportDocument = () => {
     const A4_WIDTH = 800;
     const A4_HEIGHT = 1131;
-    const PADDING = 24; // 24px padding on each side
-    const FOOTER_SPACE = 75; // Reserved for bottom footer + page counter
+    const PADDING = 26;
+    const FOOTER_SPACE = 72;
     const USABLE_HEIGHT = A4_HEIGHT - (PADDING * 2) - FOOTER_SPACE;
 
-    // Extract components from the live document
-    const headerEl = element.querySelector('#report-official-header') as HTMLElement;
-    const titleEl = element.querySelector('#report-official-title') as HTMLElement;
-    const signatureEl = element.querySelector('#report-signature-block') as HTMLElement;
-    const footerEl = element.querySelector('#report-official-footer') as HTMLElement;
-    const sessionBlocks = Array.from(element.querySelectorAll('.session-block')) as HTMLElement[];
+    const blocks = generateReportHtmlBlocks();
 
-    const createFirstPageHeader = (): HTMLElement => {
-      const wrap = document.createElement('div');
-      wrap.className = 'space-y-2 mb-2';
-      if (headerEl) wrap.appendChild(headerEl.cloneNode(true));
-      if (titleEl) wrap.appendChild(titleEl.cloneNode(true));
-      return wrap;
-    };
-
-    const createSubsequentPageHeader = (): HTMLElement => {
-      const wrap = document.createElement('div');
-      wrap.className = 'flex items-center justify-between pb-1.5 mb-2 border-b-2 border-slate-800 text-xs font-serif font-black text-slate-900';
-      wrap.innerHTML = `
-        <div class="flex items-center gap-2">
-          <span class="text-xs font-black uppercase">INSTITUT SUPERIEUR DE GENIE CIVIL ET DE GESTION (ISGG)</span>
-        </div>
-        <span class="text-[9px] text-slate-600 italic font-sans font-bold">Rapport officiel d'assiduité (Suite)</span>
-      `;
-      return wrap;
-    };
-
-    // Staging container for height measurement
+    // Temporary measuring container
     const stage = document.createElement('div');
     stage.style.position = 'fixed';
     stage.style.left = '-9999px';
@@ -609,63 +850,59 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onNavigateToStudent })
     testBox.style.boxSizing = 'border-box';
     stage.appendChild(testBox);
 
-    const pages: ExportPageData[] = [];
-    let currentPage: ExportPageData = {
+    const pages: Array<{
+      isFirstPage: boolean;
+      blocks: string[];
+      hasSignature: boolean;
+    }> = [];
+
+    let currentPage = {
       isFirstPage: true,
-      headerNode: createFirstPageHeader(),
-      blocks: [],
+      blocks: [] as string[],
       hasSignature: false,
     };
     pages.push(currentPage);
 
-    testBox.innerHTML = '';
-    testBox.appendChild(currentPage.headerNode.cloneNode(true));
+    const renderTestPage = (isFirstPage: boolean, blockList: string[], withSig: boolean) => {
+      return `
+        <div>
+          ${getOfficialReportHeaderHtml(isFirstPage)}
+          <div style="margin-top: 6px;">
+            ${blockList.join('')}
+          </div>
+          ${withSig ? getOfficialReportSignatureHtml() : ''}
+        </div>
+      `;
+    };
 
-    // Distribute session blocks across pages without splitting tables
-    for (let i = 0; i < sessionBlocks.length; i++) {
-      const block = sessionBlocks[i];
-      const blockClone = block.cloneNode(true) as HTMLElement;
+    for (let i = 0; i < blocks.length; i++) {
+      const block = blocks[i];
+      testBox.innerHTML = renderTestPage(currentPage.isFirstPage, [...currentPage.blocks, block], false);
 
-      testBox.appendChild(blockClone);
-      const newHeight = testBox.offsetHeight;
-
-      if (newHeight > USABLE_HEIGHT && currentPage.blocks.length > 0) {
-        testBox.removeChild(blockClone);
-
+      if (testBox.offsetHeight > USABLE_HEIGHT && currentPage.blocks.length > 0) {
+        // Start a new page
         currentPage = {
           isFirstPage: false,
-          headerNode: createSubsequentPageHeader(),
-          blocks: [block.cloneNode(true) as HTMLElement],
+          blocks: [block],
           hasSignature: false,
         };
         pages.push(currentPage);
-
-        testBox.innerHTML = '';
-        testBox.appendChild(currentPage.headerNode.cloneNode(true));
-        testBox.appendChild(block.cloneNode(true));
       } else {
-        currentPage.blocks.push(block.cloneNode(true) as HTMLElement);
+        currentPage.blocks.push(block);
       }
     }
 
-    // Verify if signature block fits on the last page or requires its own page
-    if (signatureEl) {
-      const sigClone = signatureEl.cloneNode(true) as HTMLElement;
-      testBox.appendChild(sigClone);
-      const heightWithSig = testBox.offsetHeight;
-
-      if (heightWithSig > USABLE_HEIGHT && currentPage.blocks.length > 0) {
-        testBox.removeChild(sigClone);
-        currentPage = {
-          isFirstPage: false,
-          headerNode: createSubsequentPageHeader(),
-          blocks: [],
-          hasSignature: true,
-        };
-        pages.push(currentPage);
-      } else {
-        currentPage.hasSignature = true;
-      }
+    // Now test if signature fits on current page
+    testBox.innerHTML = renderTestPage(currentPage.isFirstPage, currentPage.blocks, true);
+    if (testBox.offsetHeight > USABLE_HEIGHT && currentPage.blocks.length > 0) {
+      // Signature needs its own overflow page
+      pages.push({
+        isFirstPage: false,
+        blocks: [],
+        hasSignature: true,
+      });
+    } else {
+      currentPage.hasSignature = true;
     }
 
     if (document.body.contains(stage)) {
@@ -673,29 +910,20 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onNavigateToStudent })
     }
 
     return {
-      pages,
       A4_WIDTH,
       A4_HEIGHT,
       PADDING,
-      headerEl,
-      titleEl,
-      signatureEl,
-      footerEl,
+      pages,
     };
   };
 
   const handleExportPDF = async () => {
-    const element = printDocumentRef.current;
-    if (!element) {
-      showToast('Erreur: Document introuvable', 'error');
-      return;
-    }
-
     setIsExportingPDF(true);
-    showToast('Génération du fichier PDF officiel multipage en cours...', 'info');
+    showToast('Préparation du document PDF officiel...', 'info');
 
     try {
-      const { pages, A4_WIDTH, A4_HEIGHT, PADDING, signatureEl, footerEl } = paginateReportDocument(element);
+      const pagination = paginateReportDocument();
+      const { pages, A4_WIDTH, A4_HEIGHT, PADDING } = pagination;
       const totalPages = pages.length;
 
       // Create a hidden staging container on the DOM for toPng rendering
@@ -729,31 +957,28 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onNavigateToStudent })
         pageEl.style.flexDirection = 'column';
         pageEl.style.justifyContent = 'space-between';
         pageEl.style.position = 'relative';
-        pageEl.style.fontFamily = 'system-ui, -apple-system, sans-serif';
+        pageEl.style.fontFamily = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
 
-        const contentSection = document.createElement('div');
-        contentSection.className = 'space-y-3';
-        contentSection.appendChild(pageData.headerNode);
+        const contentEl = document.createElement('div');
+        contentEl.style.flex = '1 1 auto';
+        contentEl.style.display = 'flex';
+        contentEl.style.flexDirection = 'column';
+        contentEl.innerHTML = `
+          ${getOfficialReportHeaderHtml(pageData.isFirstPage)}
+          <div style="margin-top: 6px;">
+            ${pageData.blocks.join('')}
+          </div>
+          ${pageData.hasSignature ? getOfficialReportSignatureHtml() : ''}
+        `;
+        pageEl.appendChild(contentEl);
 
-        pageData.blocks.forEach((b) => {
-          contentSection.appendChild(b.cloneNode(true));
-        });
-
-        if (pageData.hasSignature && signatureEl) {
-          contentSection.appendChild(signatureEl.cloneNode(true));
+        const footerWrapper = document.createElement('div');
+        footerWrapper.innerHTML = getOfficialReportFooterHtml(p + 1, totalPages);
+        const footerNode = footerWrapper.firstElementChild as HTMLElement;
+        if (footerNode) {
+          footerNode.style.marginTop = 'auto';
+          pageEl.appendChild(footerNode);
         }
-
-        pageEl.appendChild(contentSection);
-
-        const footerClone = footerEl.cloneNode(true) as HTMLElement;
-        footerClone.style.marginTop = 'auto';
-
-        const pageNumEl = footerClone.querySelector('.page-number-display');
-        if (pageNumEl) {
-          pageNumEl.textContent = `Page ${p + 1} / ${totalPages}`;
-        }
-
-        pageEl.appendChild(footerClone);
 
         stage.innerHTML = '';
         stage.appendChild(pageEl);
@@ -795,6 +1020,121 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onNavigateToStudent })
     } finally {
       setIsExportingPDF(false);
     }
+  };
+
+  const handlePrint = () => {
+    try {
+      const pagination = paginateReportDocument();
+      const { pages } = pagination;
+      const totalPages = pages.length;
+
+      // Construct distinct A4 pages identical to the PDF output
+      const pagesHtml = pages.map((pageData, p) => `
+        <div class="print-a4-page">
+          <div class="print-page-content">
+            ${getOfficialReportHeaderHtml(pageData.isFirstPage)}
+            <div style="margin-top: 6px;">
+              ${pageData.blocks.join('')}
+            </div>
+            ${pageData.hasSignature ? getOfficialReportSignatureHtml() : ''}
+          </div>
+          ${getOfficialReportFooterHtml(p + 1, totalPages)}
+        </div>
+      `).join('');
+
+      let printWindow: Window | null = null;
+      try {
+        printWindow = window.open('', '_blank');
+      } catch {
+        printWindow = null;
+      }
+
+      if (printWindow) {
+        printWindow.document.write(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>${formattedOfficialTitle}</title>
+              <meta charset="utf-8" />
+              <script src="https://cdn.tailwindcss.com"></script>
+              <style>
+                @page {
+                  size: A4 portrait;
+                  margin: 0;
+                }
+                * {
+                  box-sizing: border-box;
+                }
+                html, body {
+                  margin: 0 !important;
+                  padding: 0 !important;
+                  background: #ffffff !important;
+                  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                  -webkit-print-color-adjust: exact !important;
+                  print-color-adjust: exact !important;
+                }
+                .print-a4-page {
+                  width: 210mm;
+                  height: 297mm;
+                  max-height: 297mm;
+                  padding: 10mm 12mm;
+                  box-sizing: border-box;
+                  display: flex !important;
+                  flex-direction: column !important;
+                  justify-content: space-between !important;
+                  page-break-after: always !important;
+                  break-after: page !important;
+                  overflow: hidden;
+                  background: #ffffff;
+                }
+                .print-a4-page:last-child {
+                  page-break-after: avoid !important;
+                  break-after: avoid !important;
+                }
+                .print-page-content {
+                  flex: 1 1 auto;
+                  display: flex;
+                  flex-direction: column;
+                  overflow: hidden;
+                }
+                .print-page-footer {
+                  margin-top: auto !important;
+                  flex-shrink: 0;
+                  padding-top: 6px;
+                  border-top: 2px solid #EA580C;
+                  font-size: 7.5pt;
+                  line-height: 1.25;
+                  text-align: center;
+                  color: #334155;
+                }
+                table {
+                  width: 100%;
+                  border-collapse: collapse;
+                }
+              </style>
+            </head>
+            <body>
+              ${pagesHtml}
+              <script>
+                window.onload = function() {
+                  setTimeout(function() {
+                    window.focus();
+                    window.print();
+                  }, 400);
+                };
+              </script>
+            </body>
+          </html>
+        `);
+        printWindow.document.close();
+        return;
+      }
+    } catch (e) {
+      console.error('Erreur impression préparée:', e);
+    }
+
+    // Direct fallback
+    window.print();
   };
 
   const handleExportConvocationPDF = async (student: StudentWithStats) => {
@@ -980,163 +1320,6 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onNavigateToStudent })
 
     // Direct fallback
     window.print();
-  };
-
-  const handlePrint = () => {
-    const element = printDocumentRef.current;
-    if (!element) {
-      window.print();
-      return;
-    }
-
-    try {
-      const { pages, signatureEl } = paginateReportDocument(element);
-      const totalPages = pages.length;
-
-      // Construct distinct A4 pages identical to the PDF output
-      const pagesHtml = pages.map((pageData, p) => `
-        <div class="print-a4-page">
-          <div class="print-page-content">
-            ${pageData.headerNode.outerHTML}
-            <div class="space-y-3 mt-2">
-              ${pageData.blocks.map(b => b.outerHTML).join('')}
-            </div>
-            ${pageData.hasSignature && signatureEl ? `<div class="mt-3">${signatureEl.outerHTML}</div>` : ''}
-          </div>
-          <div class="print-page-footer">
-            <div class="footer-top-line">
-              <span>Institut Supérieur de Génie Civil et de Gestion (ISGG)</span>
-              <span>Page ${p + 1} / ${totalPages}</span>
-            </div>
-            <p class="footer-text">
-              Siège : Ab-Calavi, Aganmandin, Immeuble BOA, 1er et 2ème étages, BP : 1938 Abomey-Calavi
-            </p>
-            <p class="footer-text-bold">
-              E-mail : isgg229@gmail.com - IFU : 3202346783540 - Tel. : 97 00 67 67 / 94 00 40 40
-            </p>
-          </div>
-        </div>
-      `).join('');
-
-      const printWindow = window.open('', '_blank');
-      if (printWindow) {
-        printWindow.document.write(`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>&nbsp;</title>
-              <meta charset="utf-8" />
-              <script src="https://cdn.tailwindcss.com"></script>
-              <style>
-                @page {
-                  size: A4 portrait;
-                  margin: 0;
-                }
-                * {
-                  box-sizing: border-box;
-                }
-                html, body {
-                  margin: 0 !important;
-                  padding: 0 !important;
-                  background: #ffffff !important;
-                  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                  -webkit-print-color-adjust: exact !important;
-                  print-color-adjust: exact !important;
-                }
-                .print-a4-page {
-                  width: 210mm;
-                  height: 297mm;
-                  max-height: 297mm;
-                  padding: 8mm 10mm;
-                  box-sizing: border-box;
-                  display: flex !important;
-                  flex-direction: column !important;
-                  justify-content: space-between !important;
-                  page-break-after: always !important;
-                  break-after: page !important;
-                  overflow: hidden;
-                  background: #ffffff;
-                }
-                .print-a4-page:last-child {
-                  page-break-after: avoid !important;
-                  break-after: avoid !important;
-                }
-                .print-page-content {
-                  flex: 1 1 auto;
-                  display: flex;
-                  flex-direction: column;
-                  overflow: hidden;
-                }
-                .print-page-footer {
-                  margin-top: auto !important;
-                  flex-shrink: 0;
-                  padding-top: 6px;
-                  border-top: 2px solid #EA580C;
-                  font-size: 7.5pt;
-                  line-height: 1.25;
-                  text-align: center;
-                  color: #334155;
-                }
-                .footer-top-line {
-                  display: flex;
-                  justify-content: space-between;
-                  align-items: center;
-                  font-size: 8pt;
-                  font-weight: 700;
-                  color: #64748b;
-                  margin-bottom: 3px;
-                  border-bottom: 1px solid #e2e8f0;
-                  padding-bottom: 2px;
-                }
-                .footer-text {
-                  margin: 0;
-                  font-weight: 500;
-                }
-                .footer-text-bold {
-                  margin: 2px 0 0 0;
-                  font-weight: 600;
-                  color: #0f172a;
-                }
-                .session-block {
-                  break-inside: avoid !important;
-                  page-break-inside: avoid !important;
-                }
-                table {
-                  width: 100%;
-                  border-collapse: collapse;
-                }
-              </style>
-            </head>
-            <body>
-              ${pagesHtml}
-              <script>
-                window.onload = function() {
-                  setTimeout(function() {
-                    window.focus();
-                    window.print();
-                  }, 400);
-                };
-              </script>
-            </body>
-          </html>
-        `);
-        printWindow.document.close();
-        return;
-      }
-    } catch (e) {
-      console.error('Erreur impression préparée:', e);
-    }
-
-    // Direct fallback
-    const originalTitle = document.title;
-    try {
-      document.title = ' ';
-      window.print();
-    } finally {
-      setTimeout(() => {
-        document.title = originalTitle;
-      }, 1000);
-    }
   };
 
   return (
