@@ -146,10 +146,55 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onNavigateToStudent })
 
   // Global & Standard Reports Filters (Daily, Weekly, Monthly)
   const defaultToday = formatISODate(new Date());
-  const [dailyDate, setDailyDate] = useState<string>('2026-09-09');
-  const [weeklyStartDate, setWeeklyStartDate] = useState<string>('2026-09-07');
-  const [weeklyEndDate, setWeeklyEndDate] = useState<string>('2026-09-13');
-  const [monthlyYearMonth, setMonthlyYearMonth] = useState<string>('2026-09');
+
+  const getCurrentWeekRange = () => {
+    const now = new Date();
+    const day = now.getDay(); // 0 is Sunday, 1 is Monday...
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+    const monday = new Date(now);
+    monday.setDate(now.getDate() + diffToMonday);
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    return {
+      start: formatISODate(monday),
+      end: formatISODate(sunday),
+    };
+  };
+
+  const getPreviousWeekRange = () => {
+    const now = new Date();
+    const day = now.getDay();
+    const diffToMonday = day === 0 ? -6 : 1 - day;
+    const prevMonday = new Date(now);
+    prevMonday.setDate(now.getDate() + diffToMonday - 7);
+    const prevSunday = new Date(prevMonday);
+    prevSunday.setDate(prevMonday.getDate() + 6);
+    return {
+      start: formatISODate(prevMonday),
+      end: formatISODate(prevSunday),
+    };
+  };
+
+  const getCurrentYearMonth = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+  };
+
+  const getPreviousYearMonth = () => {
+    const now = new Date();
+    now.setMonth(now.getMonth() - 1);
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    return `${year}-${month}`;
+  };
+
+  const initialWeek = getCurrentWeekRange();
+  const [dailyDate, setDailyDate] = useState<string>(() => defaultToday);
+  const [weeklyStartDate, setWeeklyStartDate] = useState<string>(() => initialWeek.start);
+  const [weeklyEndDate, setWeeklyEndDate] = useState<string>(() => initialWeek.end);
+  const [monthlyYearMonth, setMonthlyYearMonth] = useState<string>(getCurrentYearMonth);
 
   const [selectedProgram, setSelectedProgram] = useState<string>('all');
   const [selectedLevelId, setSelectedLevelId] = useState<string>('all');
@@ -1530,7 +1575,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onNavigateToStudent })
 
             <div>
               <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                Date de fin (Date de l&apos;examen)
+                Date de l&apos;examen
               </label>
               <input
                 type="date"
@@ -1668,9 +1713,16 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onNavigateToStudent })
             {/* Daily Date Selector */}
             {reportType === 'daily' && (
               <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                  Date de la journée
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    Date de la journée
+                  </label>
+                  {dailyDate === defaultToday && (
+                    <span className="text-[10px] font-bold text-[#EA580C] bg-orange-50 px-1.5 py-0.5 rounded">
+                      Aujourd&apos;hui
+                    </span>
+                  )}
+                </div>
                 <input
                   type="date"
                   value={dailyDate}
@@ -1684,9 +1736,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onNavigateToStudent })
             {reportType === 'weekly' && (
               <>
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                    Début de la semaine
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      Début de la semaine
+                    </label>
+                    <span className="text-[10px] text-slate-400 font-medium">Lundi</span>
+                  </div>
                   <input
                     type="date"
                     value={weeklyStartDate}
@@ -1695,9 +1750,12 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onNavigateToStudent })
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                    Fin de la semaine
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      Fin de la semaine
+                    </label>
+                    <span className="text-[10px] text-slate-400 font-medium">Dimanche</span>
+                  </div>
                   <input
                     type="date"
                     value={weeklyEndDate}
@@ -1711,9 +1769,16 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onNavigateToStudent })
             {/* Monthly Selector */}
             {reportType === 'monthly' && (
               <div>
-                <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">
-                  Mois du bilan
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                    Mois du bilan
+                  </label>
+                  {monthlyYearMonth === getCurrentYearMonth() && (
+                    <span className="text-[10px] font-bold text-[#EA580C] bg-orange-50 px-1.5 py-0.5 rounded">
+                      En cours
+                    </span>
+                  )}
+                </div>
                 <input
                   type="month"
                   value={monthlyYearMonth}
@@ -1788,7 +1853,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onNavigateToStudent })
             </div>
           </div>
 
-          {/* Quick Date Shortcuts for Daily */}
+          {/* Quick Date Shortcuts for Daily, Weekly, Monthly */}
           {reportType === 'daily' && (
             <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
               <span className="font-bold text-slate-400">Raccourcis date :</span>
@@ -1802,6 +1867,89 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onNavigateToStudent })
                 }`}
               >
                 Aujourd&apos;hui ({defaultToday})
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const y = new Date();
+                  y.setDate(y.getDate() - 1);
+                  setDailyDate(formatISODate(y));
+                }}
+                className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer border ${
+                  (() => {
+                    const y = new Date();
+                    y.setDate(y.getDate() - 1);
+                    return dailyDate === formatISODate(y);
+                  })()
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
+                }`}
+              >
+                Hier
+              </button>
+            </div>
+          )}
+
+          {reportType === 'weekly' && (
+            <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
+              <span className="font-bold text-slate-400">Raccourcis semaine :</span>
+              <button
+                type="button"
+                onClick={() => {
+                  const cur = getCurrentWeekRange();
+                  setWeeklyStartDate(cur.start);
+                  setWeeklyEndDate(cur.end);
+                }}
+                className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer border ${
+                  weeklyStartDate === getCurrentWeekRange().start && weeklyEndDate === getCurrentWeekRange().end
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
+                }`}
+              >
+                Cette semaine (Lundi - Dimanche)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const prev = getPreviousWeekRange();
+                  setWeeklyStartDate(prev.start);
+                  setWeeklyEndDate(prev.end);
+                }}
+                className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer border ${
+                  weeklyStartDate === getPreviousWeekRange().start && weeklyEndDate === getPreviousWeekRange().end
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
+                }`}
+              >
+                Semaine passée
+              </button>
+            </div>
+          )}
+
+          {reportType === 'monthly' && (
+            <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
+              <span className="font-bold text-slate-400">Raccourcis mois :</span>
+              <button
+                type="button"
+                onClick={() => setMonthlyYearMonth(getCurrentYearMonth())}
+                className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer border ${
+                  monthlyYearMonth === getCurrentYearMonth()
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
+                }`}
+              >
+                Mois en cours ({getCurrentYearMonth()})
+              </button>
+              <button
+                type="button"
+                onClick={() => setMonthlyYearMonth(getPreviousYearMonth())}
+                className={`px-2.5 py-1 rounded-lg font-bold transition-colors cursor-pointer border ${
+                  monthlyYearMonth === getPreviousYearMonth()
+                    ? 'bg-slate-900 text-white border-slate-900'
+                    : 'bg-slate-50 hover:bg-slate-100 border-slate-200 text-slate-700'
+                }`}
+              >
+                Mois précédent ({getPreviousYearMonth()})
               </button>
             </div>
           )}

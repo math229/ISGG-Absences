@@ -20,7 +20,11 @@ import {
   ShieldCheck,
   UserX,
   AlertTriangle,
-  RotateCcw
+  RotateCcw,
+  Mail,
+  Send,
+  Server,
+  RefreshCw
 } from 'lucide-react';
 import { storage } from '../../lib/storage';
 import { rateLimiter } from '../../lib/rateLimiter';
@@ -32,6 +36,13 @@ import { Network } from 'lucide-react';
 interface AdminViewProps {
   currentUser: User;
 }
+
+const getUserInitials = (name?: string): string => {
+  if (!name) return 'IS';
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
 
 export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
   const { showToast } = useToast();
@@ -51,9 +62,43 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
   const [editDirCode, setEditDirCode] = useState(securityCodes.directorCode);
   const [copiedKey, setCopiedKey] = useState<'surv' | 'dir' | null>(null);
 
+  // Institutional SMTP Server State
+  const [smtpConfig, setSmtpConfig] = useState<{
+    isConfigured: boolean;
+    host: string;
+    port: number;
+    user: string;
+    fromName: string;
+    updatedAt?: string | null;
+  } | null>(null);
+  const [isLoadingSmtp, setIsLoadingSmtp] = useState(false);
+  const [testEmailAddress, setTestEmailAddress] = useState(currentUser.email || 'isggabsence@gmail.com');
+  const [isSendingTestEmail, setIsSendingTestEmail] = useState(false);
+  const [testEmailFeedback, setTestEmailFeedback] = useState<{ success: boolean; message: string } | null>(null);
+
+  const [isEditingSmtp, setIsEditingSmtp] = useState(false);
+  const [smtpHost, setSmtpHost] = useState('smtp.gmail.com');
+  const [smtpPort, setSmtpPort] = useState(465);
+  const [smtpUser, setSmtpUser] = useState('isggabsence@gmail.com');
+  const [smtpPass, setSmtpPass] = useState('');
+  const [smtpFromName, setSmtpFromName] = useState('ISGG Institut Supérieur de Génie Civil et de Gestion');
+  const [isSavingSmtp, setIsSavingSmtp] = useState(false);
+  const [smtpSaveError, setSmtpSaveError] = useState<string | null>(null);
+
   // Editing Program Groups modal/panel state
   const [editingProgramGroupsId, setEditingProgramGroupsId] = useState<string | null>(null);
   const [customGroupInput, setCustomGroupInput] = useState('');
+
+  // Program Creation & Edition state
+  const [isAddingProgram, setIsAddingProgram] = useState(false);
+  const [newProgramName, setNewProgramName] = useState('');
+  const [newProgramCode, setNewProgramCode] = useState('');
+  const [newProgramDesc, setNewProgramDesc] = useState('');
+
+  const [editingProgramId, setEditingProgramId] = useState<string | null>(null);
+  const [editProgramName, setEditProgramName] = useState('');
+  const [editProgramCode, setEditProgramCode] = useState('');
+  const [editProgramDesc, setEditProgramDesc] = useState('');
 
   // Editing Student Group modal/panel state
   const [editingStudentId, setEditingStudentId] = useState<string | null>(null);
@@ -84,6 +129,9 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
       setSecurityCodes(updatedCodes);
       setEditSurvCode(updatedCodes.surveillantCode);
       setEditDirCode(updatedCodes.directorCode);
+      setPrograms([...storage.getAllPrograms()]);
+      setStudentsList([...storage.getStudents()]);
+      setSubjects([...storage.getAllSubjects()]);
     });
     return () => unsub();
   }, []);
@@ -126,6 +174,97 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
       showToast(res.message, 'info');
     } else {
       showToast(res.message, 'error');
+    }
+  };
+
+  // Fetch SMTP config from backend
+  const fetchSmtpConfig = async () => {
+    setIsLoadingSmtp(true);
+    try {
+      const res = await fetch('/api/admin/smtp');
+      const data = await res.json();
+      if (data.success && data.config) {
+        setSmtpConfig(data.config);
+        if (data.config.user) setSmtpUser(data.config.user);
+        if (data.config.host) setSmtpHost(data.config.host);
+        if (data.config.port) setSmtpPort(data.config.port);
+        if (data.config.fromName) setSmtpFromName(data.config.fromName);
+      }
+    } catch (err) {
+      console.warn('Erreur chargement SMTP config:', err);
+    } finally {
+      setIsLoadingSmtp(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSmtpConfig();
+  }, []);
+
+  const handleSendTestEmail = async () => {
+    if (!testEmailAddress || !testEmailAddress.includes('@')) {
+      showToast('Veuillez renseigner une adresse email valide pour le test.', 'error');
+      return;
+    }
+    setIsSendingTestEmail(true);
+    setTestEmailFeedback(null);
+    try {
+      const res = await fetch('/api/admin/smtp/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetEmail: testEmailAddress.trim() }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setTestEmailFeedback({ success: true, message: data.message });
+        showToast('Email de test officiel expédié avec succès !', 'success');
+      } else {
+        setTestEmailFeedback({ success: false, message: data.error || 'Échec de l\'envoi de test.' });
+        showToast(data.error || 'Échec du test SMTP', 'error');
+      }
+    } catch {
+      setTestEmailFeedback({ success: false, message: 'Erreur de connexion au serveur.' });
+      showToast('Erreur lors de l\'envoi du test SMTP.', 'error');
+    } finally {
+      setIsSendingTestEmail(false);
+    }
+  };
+
+  const handleSaveSmtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!smtpUser || !smtpPass) {
+      setSmtpSaveError('L\'adresse email SMTP et le mot de passe d\'application sont obligatoires.');
+      return;
+    }
+    setIsSavingSmtp(true);
+    setSmtpSaveError(null);
+    try {
+      const res = await fetch('/api/admin/smtp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          host: smtpHost.trim(),
+          port: Number(smtpPort),
+          user: smtpUser.trim(),
+          pass: smtpPass.trim(),
+          fromName: smtpFromName.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        showToast('Configuration SMTP validée et enregistrée en production !', 'success');
+        setIsEditingSmtp(false);
+        setSmtpPass('');
+        fetchSmtpConfig();
+      } else {
+        setSmtpSaveError(data.error || 'Erreur lors de la configuration SMTP.');
+        showToast(data.error || 'Erreur enregistrement SMTP', 'error');
+      }
+    } catch {
+      setSmtpSaveError('Erreur de communication avec le serveur.');
+      showToast('Erreur réseau lors de la mise à jour SMTP.', 'error');
+    } finally {
+      setIsSavingSmtp(false);
     }
   };
 
@@ -242,6 +381,100 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
     storage.setProgramGroups(programId, updated);
     refreshData();
     showToast(`Groupe ${groupToRemove} retiré de la filière`, 'info');
+  };
+
+  // Program Management Handlers
+  const handleCreateProgram = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanName = newProgramName.trim();
+    const cleanCode = newProgramCode.trim().toUpperCase();
+
+    if (!cleanName || !cleanCode) {
+      showToast('Veuillez renseigner le nom complet et les initiales de la filière.', 'error');
+      return;
+    }
+
+    const existingCode = programs.find(p => p.code.toUpperCase() === cleanCode);
+    if (existingCode) {
+      showToast(`Une filière avec les initiales "${cleanCode}" existe déjà (${existingCode.name}).`, 'error');
+      return;
+    }
+
+    const created = storage.saveProgram({
+      name: cleanName,
+      code: cleanCode,
+      description: newProgramDesc.trim() || `Filière d'études supérieures ${cleanCode} à l'ISGG`,
+      availableGroups: ['A', 'B'],
+    });
+
+    refreshData();
+    setIsAddingProgram(false);
+    setNewProgramName('');
+    setNewProgramCode('');
+    setNewProgramDesc('');
+    showToast(`Filière ${created.name} (${created.code}) ajoutée avec succès !`, 'success');
+  };
+
+  const handleStartEditProgram = (prog: Program) => {
+    setEditingProgramId(prog.id);
+    setEditProgramName(prog.name);
+    setEditProgramCode(prog.code);
+    setEditProgramDesc(prog.description || '');
+  };
+
+  const handleCancelEditProgram = () => {
+    setEditingProgramId(null);
+    setEditProgramName('');
+    setEditProgramCode('');
+    setEditProgramDesc('');
+  };
+
+  const handleSaveEditProgram = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingProgramId) return;
+
+    const cleanName = editProgramName.trim();
+    const cleanCode = editProgramCode.trim().toUpperCase();
+
+    if (!cleanName || !cleanCode) {
+      showToast('Le nom et les initiales ne peuvent pas être vides.', 'error');
+      return;
+    }
+
+    const existingOther = programs.find(p => p.id !== editingProgramId && p.code.toUpperCase() === cleanCode);
+    if (existingOther) {
+      showToast(`Une autre filière utilise déjà les initiales "${cleanCode}" (${existingOther.name}).`, 'error');
+      return;
+    }
+
+    storage.saveProgram({
+      id: editingProgramId,
+      name: cleanName,
+      code: cleanCode,
+      description: editProgramDesc.trim(),
+    });
+
+    refreshData();
+    setEditingProgramId(null);
+    showToast(`Filière mise à jour : ${cleanCode} - ${cleanName}`, 'success');
+  };
+
+  const handleDeleteProgram = (prog: Program) => {
+    const studentCount = studentsList.filter(s => s.programId === prog.id).length;
+    if (studentCount > 0) {
+      showToast(`Action bloquée : ${studentCount} étudiant(s) sont inscrits en filière ${prog.code}. Réaffectez-les avant suppression.`, 'error');
+      return;
+    }
+
+    if (window.confirm(`Confirmez-vous la suppression définitive de la filière "${prog.name} (${prog.code})" ?`)) {
+      const res = storage.deleteProgram(prog.id);
+      if (res.success) {
+        refreshData();
+        showToast(`Filière ${prog.code} supprimée avec succès.`, 'info');
+      } else {
+        showToast(res.message || 'Erreur lors de la suppression.', 'error');
+      }
+    }
   };
 
   // Handle Add Subject
@@ -575,39 +808,267 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
 
       {/* TAB 2: FILIÈRES */}
       {activeTab === 'programs' && (
-        <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+        <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-5">
+          {/* Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
             <div>
-              <h3 className="text-base font-bold text-slate-900">Filières académiques et gestion des groupes / classes</h3>
-              <p className="text-xs text-slate-500">
-                Configurez les divisions en classes (A, B, C...) pour la Génie Informatique et toute autre filière
+              <div className="flex items-center gap-2">
+                <Building className="w-5 h-5 text-[#EA580C]" />
+                <h3 className="text-base font-bold text-slate-900">Filières académiques de l&apos;ISGG</h3>
+              </div>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Consultez la liste des filières et leurs initiales, modifiez leurs dénominations ou ajoutez une nouvelle filière à l&apos;école.
               </p>
             </div>
-            <span className="text-xs font-bold text-[#EA580C] bg-orange-50 px-3 py-1.5 rounded-xl border border-orange-200">
-              {programs.length} filières actives
-            </span>
+            <div className="flex items-center gap-2 self-start sm:self-auto">
+              <span className="text-xs font-bold text-[#EA580C] bg-orange-50 px-3 py-1.5 rounded-xl border border-orange-200 whitespace-nowrap">
+                {programs.length} filières actives
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsAddingProgram(!isAddingProgram);
+                  if (editingProgramId) setEditingProgramId(null);
+                }}
+                className="px-3.5 py-1.5 rounded-xl bg-[#EA580C] hover:bg-[#D94600] text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer whitespace-nowrap"
+              >
+                {isAddingProgram ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+                <span>{isAddingProgram ? 'Fermer' : 'Nouvelle filière'}</span>
+              </button>
+            </div>
           </div>
 
+          {/* Form: Add New Program */}
+          {isAddingProgram && (
+            <form onSubmit={handleCreateProgram} className="p-5 rounded-2xl bg-orange-50/70 border-2 border-orange-200 space-y-4 animate-in fade-in duration-200">
+              <div className="flex items-center justify-between pb-2 border-b border-orange-200/60">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-[#EA580C] text-white flex items-center justify-center font-black text-xs shadow-2xs">
+                    <Plus className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900">Créer une nouvelle filière pour l&apos;ISGG</h4>
+                    <p className="text-[11px] text-slate-500">Ajoutez une filière avec ses initiales officielles et sa description pédagogique</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsAddingProgram(false)}
+                  className="text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Nom complet de la filière *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="ex: Réseaux & Télécommunications"
+                    value={newProgramName}
+                    onChange={e => setNewProgramName(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-bold text-slate-900 bg-white border border-slate-200 rounded-xl focus:border-[#EA580C] focus:ring-1 focus:ring-[#EA580C] outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Initiales / Sigle officiel *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={10}
+                    placeholder="ex: RT, GC, FC, EL..."
+                    value={newProgramCode}
+                    onChange={e => setNewProgramCode(e.target.value.toUpperCase())}
+                    className="w-full px-3 py-2 text-xs font-bold text-slate-900 uppercase bg-white border border-slate-200 rounded-xl focus:border-[#EA580C] focus:ring-1 focus:ring-[#EA580C] outline-none"
+                  />
+                </div>
+
+                <div className="sm:col-span-2 lg:col-span-1">
+                  <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Description pédagogique
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="ex: Systèmes réseaux, télécommunications et cybersécurité..."
+                    value={newProgramDesc}
+                    onChange={e => setNewProgramDesc(e.target.value)}
+                    className="w-full px-3 py-2 text-xs text-slate-900 bg-white border border-slate-200 rounded-xl focus:border-[#EA580C] focus:ring-1 focus:ring-[#EA580C] outline-none"
+                  />
+                </div>
+              </div>
+
+              {newProgramCode && (
+                <div className="flex items-center gap-2 text-xs text-slate-700 bg-white/90 p-2.5 rounded-xl border border-orange-200/60 shadow-2xs">
+                  <span className="font-semibold text-slate-500">Aperçu du badge :</span>
+                  <span className="text-xs font-black text-[#EA580C] bg-orange-100 px-2.5 py-0.5 rounded-lg">
+                    {newProgramCode.toUpperCase()}
+                  </span>
+                  <span className="font-bold text-slate-800">{newProgramName || 'Nom de la filière'}</span>
+                  <span className="text-[11px] text-slate-400 font-mono ml-auto">Classes par défaut : A, B</span>
+                </div>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-orange-200/60">
+                <button
+                  type="button"
+                  onClick={() => setIsAddingProgram(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 cursor-pointer"
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-[#EA580C] hover:bg-[#D94600] text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Enregistrer la filière</span>
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Programs Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {programs.map(prog => {
               const currentGroups = storage.getProgramGroups(prog.id);
               const isEditingThisProg = editingProgramGroupsId === prog.id;
+              const isEditingInfo = editingProgramId === prog.id;
+              const enrolledStudentsCount = studentsList.filter(s => s.programId === prog.id).length;
 
               return (
-                <div key={prog.id} className="p-5 rounded-2xl border border-slate-200 hover:border-orange-300 transition-all bg-slate-50/50 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-black text-[#EA580C] bg-orange-100 px-2.5 py-1 rounded-lg">
-                      {prog.code}
-                    </span>
-                    <span className="text-[10px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full font-bold">
-                      Active
-                    </span>
+                <div
+                  key={prog.id}
+                  className={`p-5 rounded-2xl border transition-all space-y-3.5 ${
+                    isEditingInfo 
+                      ? 'border-[#EA580C] bg-orange-50/20 shadow-xs' 
+                      : 'border-slate-200 hover:border-orange-300 bg-slate-50/50'
+                  }`}
+                >
+                  {/* Top Bar: Initials badge, status, and actions */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black text-[#EA580C] bg-orange-100 px-2.5 py-1 rounded-lg tracking-wider">
+                        {prog.code}
+                      </span>
+                      <span className="text-[10px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full font-bold border border-emerald-200/60">
+                        Active
+                      </span>
+                      <span className="text-[11px] text-slate-500 font-semibold flex items-center gap-1">
+                        <Users className="w-3 h-3 text-slate-400" />
+                        <span>{enrolledStudentsCount} étudiant{enrolledStudentsCount > 1 ? 's' : ''}</span>
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      {!isEditingInfo && (
+                        <button
+                          type="button"
+                          onClick={() => handleStartEditProgram(prog)}
+                          className="px-2.5 py-1 rounded-lg text-xs font-bold text-slate-700 bg-white border border-slate-200 hover:border-orange-300 hover:text-[#EA580C] shadow-2xs transition-all flex items-center gap-1 cursor-pointer"
+                          title="Modifier le nom et les initiales"
+                        >
+                          <Edit className="w-3 h-3 text-slate-500" />
+                          <span>Modifier</span>
+                        </button>
+                      )}
+
+                      {enrolledStudentsCount === 0 && !isEditingInfo && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteProgram(prog)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-transparent hover:border-rose-200 transition-all cursor-pointer"
+                          title="Supprimer cette filière"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
-                  <div>
-                    <h4 className="font-bold text-slate-900 text-sm">{prog.name}</h4>
-                    <p className="text-xs text-slate-500 mt-0.5">{prog.description}</p>
-                  </div>
+                  {/* Form inline edit or standard view */}
+                  {isEditingInfo ? (
+                    <form onSubmit={handleSaveEditProgram} className="p-3 bg-white rounded-xl border border-orange-200 space-y-3 shadow-2xs">
+                      <div className="flex items-center justify-between pb-1.5 border-b border-slate-100">
+                        <span className="text-xs font-bold text-[#EA580C]">
+                          Modifier la filière
+                        </span>
+                        <span className="text-[10px] text-slate-400">ID: {prog.id}</span>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-0.5">
+                            Nom de la filière
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            value={editProgramName}
+                            onChange={e => setEditProgramName(e.target.value)}
+                            className="w-full px-2.5 py-1.5 text-xs font-bold text-slate-900 bg-slate-50 border border-slate-200 rounded-lg focus:border-[#EA580C] outline-none"
+                            placeholder="Intitulé complet"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-0.5">
+                            Initiales / Sigle
+                          </label>
+                          <input
+                            type="text"
+                            required
+                            maxLength={10}
+                            value={editProgramCode}
+                            onChange={e => setEditProgramCode(e.target.value.toUpperCase())}
+                            className="w-full px-2.5 py-1.5 text-xs font-bold uppercase text-slate-900 bg-slate-50 border border-slate-200 rounded-lg focus:border-[#EA580C] outline-none"
+                            placeholder="ex: GI"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-0.5">
+                            Description
+                          </label>
+                          <input
+                            type="text"
+                            value={editProgramDesc}
+                            onChange={e => setEditProgramDesc(e.target.value)}
+                            className="w-full px-2.5 py-1.5 text-xs text-slate-900 bg-slate-50 border border-slate-200 rounded-lg focus:border-[#EA580C] outline-none"
+                            placeholder="Description pédagogique"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end gap-1.5 pt-1">
+                        <button
+                          type="button"
+                          onClick={handleCancelEditProgram}
+                          className="px-3 py-1.5 text-xs font-bold text-slate-600 hover:text-slate-800 rounded-lg cursor-pointer"
+                        >
+                          Annuler
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-3 py-1.5 bg-[#EA580C] hover:bg-[#D94600] text-white text-xs font-bold rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Enregistrer</span>
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div>
+                      <h4 className="font-bold text-slate-900 text-sm">{prog.name}</h4>
+                      <p className="text-xs text-slate-500 mt-0.5 leading-relaxed">{prog.description}</p>
+                    </div>
+                  )}
 
                   {/* Program Groups Section */}
                   <div className="pt-2 border-t border-slate-200/70 space-y-2">
@@ -992,7 +1453,290 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
             )}
           </div>
 
-          {/* SECTION 2: LISTE DU PERSONNEL & GESTION DES COMPTES */}
+          {/* SECTION 2: SERVEUR SMTP INSTITUTIONNEL & EXPÉDITION D'EMAILS */}
+          <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                  <Mail className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                    Serveur SMTP Institutionnel & Expédition des Emails
+                    {smtpConfig?.isConfigured ? (
+                      <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1">
+                        <Check className="w-3 h-3" /> Opérationnel (Firestore)
+                      </span>
+                    ) : (
+                      <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                        En attente
+                      </span>
+                    )}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Acheminement en direct des codes OTP d&apos;inscription, réinitialisations de mot de passe et notifications.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={fetchSmtpConfig}
+                  disabled={isLoadingSmtp}
+                  className="p-2 rounded-xl text-slate-500 hover:text-slate-800 hover:bg-slate-100 transition-colors cursor-pointer"
+                  title="Rafraîchir le statut SMTP"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isLoadingSmtp ? 'animate-spin text-[#EA580C]' : ''}`} />
+                </button>
+                {!isEditingSmtp ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsEditingSmtp(true);
+                      setSmtpSaveError(null);
+                    }}
+                    className="px-3.5 py-2 rounded-xl text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 transition-colors flex items-center gap-1.5 cursor-pointer w-fit"
+                  >
+                    <Edit className="w-3.5 h-3.5" />
+                    <span>Modifier les paramètres SMTP</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingSmtp(false)}
+                    className="px-3.5 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100 transition-colors flex items-center gap-1 cursor-pointer w-fit"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>Annuler</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {!isEditingSmtp ? (
+              <div className="space-y-4">
+                {/* Carte Statut Actuel */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+                      Compte Expéditeur
+                    </span>
+                    <span className="text-xs font-mono font-bold text-slate-900 break-all">
+                      {smtpConfig?.user || 'isggabsence@gmail.com'}
+                    </span>
+                    <span className="text-[10px] text-slate-400 block mt-0.5">
+                      {smtpConfig?.fromName || 'ISGG Institut Supérieur de Génie Civil et de Gestion'}
+                    </span>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+                      Serveur & Port
+                    </span>
+                    <span className="text-xs font-mono font-bold text-slate-900">
+                      {smtpConfig?.host || 'smtp.gmail.com'} : {smtpConfig?.port || 465}
+                    </span>
+                    <span className="text-[10px] text-emerald-600 font-semibold block mt-0.5">
+                      Chiffrement SSL / TLS sécurisé
+                    </span>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+                      Persistance Cloud
+                    </span>
+                    <span className="text-xs font-semibold text-emerald-700 flex items-center gap-1">
+                      <ShieldCheck className="w-3.5 h-3.5" /> Firestore Chiffré AES-256
+                    </span>
+                    <span className="text-[10px] text-slate-400 block mt-0.5">
+                      Persistant sur tous les redéploiements
+                    </span>
+                  </div>
+                </div>
+
+                {/* Boîte de Test d'Envoi en Direct */}
+                <div className="p-4 rounded-xl bg-blue-50/50 border border-blue-200/70 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-blue-950 flex items-center gap-1.5">
+                      <Send className="w-3.5 h-3.5 text-blue-600" />
+                      Tester l&apos;acheminement d&apos;un email en direct
+                    </span>
+                    <span className="text-[11px] text-blue-700 font-medium">
+                      Envoie un email réel de confirmation
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <input
+                      type="email"
+                      value={testEmailAddress}
+                      onChange={e => setTestEmailAddress(e.target.value)}
+                      placeholder="votre-adresse@gmail.com"
+                      className="flex-1 px-3.5 py-2 bg-white border border-blue-200 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSendTestEmail}
+                      disabled={isSendingTestEmail}
+                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-xs font-bold rounded-lg shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
+                    >
+                      {isSendingTestEmail ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Expédition en cours...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send className="w-3.5 h-3.5" />
+                          <span>Envoyer le test</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {testEmailFeedback && (
+                    <div className={`p-3 rounded-lg text-xs flex items-start gap-2 ${
+                      testEmailFeedback.success 
+                        ? 'bg-emerald-50 text-emerald-900 border border-emerald-200' 
+                        : 'bg-rose-50 text-rose-900 border border-rose-200'
+                    }`}>
+                      {testEmailFeedback.success ? (
+                        <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                      )}
+                      <span>{testEmailFeedback.message}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              /* Formulaire de modification SMTP */
+              <form onSubmit={handleSaveSmtp} className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <Server className="w-3.5 h-3.5 text-[#EA580C]" />
+                    Configuration du Serveur SMTP Institutionnel
+                  </h4>
+                  <span className="text-[10px] text-slate-500">
+                    Les identifiants sont chiffrés en AES-256 dans Firestore
+                  </span>
+                </div>
+
+                {smtpSaveError && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-800 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-rose-600" />
+                    <span>{smtpSaveError}</span>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Serveur SMTP (Hôte)
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={smtpHost}
+                      onChange={e => setSmtpHost(e.target.value)}
+                      placeholder="smtp.gmail.com"
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#EA580C]/20 focus:border-[#EA580C]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Port SMTP (465 SSL ou 587 TLS)
+                    </label>
+                    <input
+                      type="number"
+                      required
+                      value={smtpPort}
+                      onChange={e => setSmtpPort(Number(e.target.value))}
+                      placeholder="465"
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#EA580C]/20 focus:border-[#EA580C]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Adresse Email Expéditrice (Compte Google / Domaine)
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={smtpUser}
+                      onChange={e => setSmtpUser(e.target.value)}
+                      placeholder="isggabsence@gmail.com"
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#EA580C]/20 focus:border-[#EA580C]"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Mot de passe d&apos;application Google (16 caractères)
+                    </label>
+                    <input
+                      type="password"
+                      required
+                      value={smtpPass}
+                      onChange={e => setSmtpPass(e.target.value)}
+                      placeholder="xxxx xxxx xxxx xxxx"
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-[#EA580C]/20 focus:border-[#EA580C]"
+                    />
+                    <span className="text-[10px] text-slate-500">
+                      Généré dans Mon Compte Google &gt; Sécurité &gt; Mots de passe des applications
+                    </span>
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Nom affiché de l&apos;expéditeur
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={smtpFromName}
+                      onChange={e => setSmtpFromName(e.target.value)}
+                      placeholder="ISGG Institut Supérieur de Génie Civil et de Gestion"
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#EA580C]/20 focus:border-[#EA580C]"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 pt-2 border-t border-slate-200">
+                  <button
+                    type="submit"
+                    disabled={isSavingSmtp}
+                    className="px-4 py-2 bg-[#EA580C] hover:bg-[#D94600] disabled:bg-orange-300 text-white text-xs font-bold rounded-lg shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+                  >
+                    {isSavingSmtp ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Vérification & Sauvegarde...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Enregistrer & Vérifier la connexion</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditingSmtp(false)}
+                    className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                  >
+                    Annuler
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+
+          {/* SECTION 3: LISTE DU PERSONNEL & GESTION DES COMPTES */}
           <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-4">
             <div className="flex items-center justify-between">
               <div>
@@ -1014,14 +1758,12 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUser }) => {
                 return (
                   <div key={u.id} className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 overflow-hidden flex items-center justify-center shrink-0">
-                        {u.avatarUrl ? (
-                          <img src={u.avatarUrl} alt={u.name} className="w-full h-full object-cover" />
-                        ) : (
-                          <span className="text-xs font-bold text-slate-600">
-                            {u.name.substring(0, 2).toUpperCase()}
-                          </span>
-                        )}
+                      <div 
+                        className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 font-bold text-xs text-white shadow-xs border border-white/20 ${
+                          u.role === 'ADMIN' ? 'bg-[#EA580C]' : 'bg-slate-800'
+                        }`}
+                      >
+                        {getUserInitials(u.name)}
                       </div>
                       <div>
                         <div className="flex items-center gap-2">

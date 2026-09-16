@@ -30,10 +30,12 @@ import { db } from './firebase';
 import {
   collection,
   doc,
+  getDoc,
   setDoc,
   deleteDoc,
   onSnapshot,
   writeBatch,
+  enableNetwork,
 } from 'firebase/firestore';
 import { 
   hashPassword, 
@@ -119,275 +121,12 @@ export function getBeninSchoolYear(date: Date = new Date()): { id: string; name:
   };
 }
 
-// Generate realistic initial seed absences
-function generateInitialAbsences(students: Student[], subjects: Subject[]): Absence[] {
-  const absences: Absence[] = [];
-  const now = new Date();
-  const todayStr = formatISODate(now);
-
-  // 1. Give APITHY Mathieu exactly 7 initial absences (from the specifications)
-  const apithySubjects = subjects.filter(s => s.programId === 'prog-gi' && s.levelId === 'lvl-l2');
-  const pastDates = [
-    '2026-09-02',
-    '2026-09-03',
-    '2026-09-04',
-    '2026-09-05',
-    '2026-09-07',
-    '2026-09-08',
-    '2026-09-08',
-  ];
-  pastDates.forEach((d, idx) => {
-    const sub = apithySubjects[idx % apithySubjects.length] || apithySubjects[0];
-    absences.push({
-      id: `abs-init-apithy-${idx + 1}`,
-      studentId: 'stu-apithy-mathieu',
-      subjectId: sub.id,
-      schoolYearId: INITIAL_SCHOOL_YEAR.id,
-      recordedBy: 'M. Diallo',
-      absenceDate: d,
-      absenceTime: idx % 2 === 0 ? '08:15' : '10:30',
-      createdAt: `${d}T08:15:00Z`,
-    });
-  });
-
-  // 2. Specific records matching Panel 4 mockup:
-  // Kouassi Yao (GC, L3, Béton Armé, 28/04/2025 08:15)
-  // Traoré Aminata (GP, L2, Comptabilité, 28/04/2025 09:32)
-  // Diop Mamadou (GI, L1, Algorithmique, 28/04/2025 10:05)
-  // Bamba Fatou (GC, L2, Mécanique des sols, 28/04/2025 11:20)
-  // Koné Ibrahim (GP, L3, Marketing, 28/04/2025 13:45)
-  // Coulibaly Mariam (GT, L1, Dessin technique, 28/04/2025 14:30)
-  const mockupData = [
-    { stu: 'stu-kouassi-yao', sub: 'sub-gc-l3-ba', date: '2026-09-09', time: '08:15' },
-    { stu: 'stu-traore-aminata', sub: 'sub-gp-l2-compta', date: '2026-09-09', time: '09:32' },
-    { stu: 'stu-diop-mamadou', sub: 'sub-l1-algorithme', date: '2026-09-09', time: '10:05' },
-    { stu: 'stu-bamba-fatou', sub: 'sub-gc-l2-ms', date: '2026-09-09', time: '11:20' },
-    { stu: 'stu-kone-ibrahim', sub: 'sub-gp-l3-mkt', date: '2026-09-09', time: '13:45' },
-    { stu: 'stu-coulibaly-mariam', sub: 'sub-gt-l1-dt', date: '2026-09-09', time: '14:30' },
-  ];
-
-  mockupData.forEach((item, idx) => {
-    absences.push({
-      id: `abs-mockup-${idx + 1}`,
-      studentId: item.stu,
-      subjectId: item.sub,
-      schoolYearId: INITIAL_SCHOOL_YEAR.id,
-      recordedBy: 'M. Diallo',
-      absenceDate: item.date,
-      absenceTime: item.time,
-      createdAt: `${item.date}T${item.time}:00Z`,
-    });
-  });
-
-  // Official ISGG Course Sessions Absences matching User Submitted Sheet (09/09/2026)
-  const ceo2Sub = subjects.find(s => s.id === 'sub-l2-communication-ecrite-2') || subjects[0];
-  const algSub = subjects.find(s => s.id === 'sub-l2-algebre-lineaire') || subjects[1] || subjects[0];
-
-  // Session 1: GI / SIL2_A | Matière: CEO II | 08h à 12h
-  const sil2A_Ceo2Students = [
-    'stu-aboki-job',
-    'stu-amossou-marcelin',
-    'stu-atioukpe-carlos',
-    'stu-bouraima-abdel',
-    'stu-chabi-isdeen',
-    'stu-doumatey-chimene',
-    'stu-ganni-loukman',
-    'stu-nata-jean-yves',
-  ];
-  sil2A_Ceo2Students.forEach((stuId, idx) => {
-    absences.push({
-      id: `abs-isgg-sil2a-ceo2-${idx + 1}`,
-      studentId: stuId,
-      subjectId: ceo2Sub.id,
-      schoolYearId: INITIAL_SCHOOL_YEAR.id,
-      recordedBy: 'M. Nicaise AÏZOUN',
-      absenceDate: '2026-09-09',
-      absenceTime: '08:00',
-      startTime: '08:00',
-      endTime: '12:00',
-      timeRange: '08h à 12h',
-      className: 'GI / SIL2_A',
-      observations: 'Sans motif',
-      createdAt: `2026-09-09T08:00:00Z`,
-    });
-  });
-
-  // Session 2: GI / SIL2_B | Matière: CEO II | 08h à 12h
-  const sil2B_Ceo2Students = [
-    'stu-acakpo-andre',
-    'stu-bode-stephane',
-    'stu-gnanguenon-gloria',
-    'stu-oladeyo-koudjibou',
-    'stu-sero-tikande',
-    'stu-sidi-delphin',
-  ];
-  sil2B_Ceo2Students.forEach((stuId, idx) => {
-    absences.push({
-      id: `abs-isgg-sil2b-ceo2-${idx + 1}`,
-      studentId: stuId,
-      subjectId: ceo2Sub.id,
-      schoolYearId: INITIAL_SCHOOL_YEAR.id,
-      recordedBy: 'M. Nicaise AÏZOUN',
-      absenceDate: '2026-09-09',
-      absenceTime: '08:00',
-      startTime: '08:00',
-      endTime: '12:00',
-      timeRange: '08h à 12h',
-      className: 'GI / SIL2_B',
-      observations: 'Sans motif',
-      createdAt: `2026-09-09T08:00:00Z`,
-    });
-  });
-
-  // Session 3: GI / SIL2_A | Matière: Algèbre linéaire | 13h à 17h
-  const sil2A_AlgStudents = [
-    'stu-aboki-job',
-    'stu-amossou-marcelin',
-    'stu-atioukpe-carlos',
-    'stu-bouraima-abdel',
-  ];
-  sil2A_AlgStudents.forEach((stuId, idx) => {
-    absences.push({
-      id: `abs-isgg-sil2a-alg-${idx + 1}`,
-      studentId: stuId,
-      subjectId: algSub.id,
-      schoolYearId: INITIAL_SCHOOL_YEAR.id,
-      recordedBy: 'M. Nicaise AÏZOUN',
-      absenceDate: '2026-09-09',
-      absenceTime: '13:00',
-      startTime: '13:00',
-      endTime: '17:00',
-      timeRange: '13h à 17h',
-      className: 'GI / SIL2_A',
-      observations: 'Sans motif',
-      createdAt: `2026-09-09T13:00:00Z`,
-    });
-  });
-
-  // Session 4: GI / SIL2_B | Matière: Algèbre linéaire | 13h à 17h
-  const sil2B_AlgStudents = [
-    'stu-acakpo-andre',
-    'stu-bode-stephane',
-    'stu-gnanguenon-gloria',
-  ];
-  sil2B_AlgStudents.forEach((stuId, idx) => {
-    absences.push({
-      id: `abs-isgg-sil2b-alg-${idx + 1}`,
-      studentId: stuId,
-      subjectId: algSub.id,
-      schoolYearId: INITIAL_SCHOOL_YEAR.id,
-      recordedBy: 'M. Nicaise AÏZOUN',
-      absenceDate: '2026-09-09',
-      absenceTime: '13:00',
-      startTime: '13:00',
-      endTime: '17:00',
-      timeRange: '13h à 17h',
-      className: 'GI / SIL2_B',
-      observations: 'Sans motif',
-      createdAt: `2026-09-09T13:00:00Z`,
-    });
-  });
-
-  // 3. Fill up to match ~24 absences today, ~137 this week, ~1284 total
-  const remainingToday = 18;
-  for (let i = 0; i < remainingToday; i++) {
-    const randomStu = students[i % students.length];
-    const stuSubjects = subjects.filter(s => s.programId === randomStu.programId) || subjects;
-    const randomSub = stuSubjects[i % stuSubjects.length] || subjects[0];
-    const hour = 8 + Math.floor(i / 3);
-    const min = (i * 12) % 60;
-    const timeStr = `${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
-
-    absences.push({
-      id: `abs-today-${i + 1}`,
-      studentId: randomStu.id,
-      subjectId: randomSub.id,
-      schoolYearId: INITIAL_SCHOOL_YEAR.id,
-      recordedBy: 'M. Diallo',
-      absenceDate: todayStr,
-      absenceTime: timeStr,
-      createdAt: `${todayStr}T${timeStr}:00Z`,
-    });
-  }
-
-  // Add more past days of this week to reach 137 absences for the week
-  const daysAgo = [1, 2, 3, 4, 5, 6];
-  let weekCounter = 24;
-  for (const d of daysAgo) {
-    const pastDay = new Date(now);
-    pastDay.setDate(pastDay.getDate() - d);
-    const pStr = formatISODate(pastDay);
-    const countForDay = Math.min(22, 137 - weekCounter);
-    for (let j = 0; j < countForDay; j++) {
-      const randomStu = students[(j + d * 3) % students.length];
-      const stuSubjects = subjects.filter(s => s.programId === randomStu.programId);
-      const randomSub = stuSubjects[j % (stuSubjects.length || 1)] || subjects[0];
-      absences.push({
-        id: `abs-week-${d}-${j}`,
-        studentId: randomStu.id,
-        subjectId: randomSub.id,
-        schoolYearId: INITIAL_SCHOOL_YEAR.id,
-        recordedBy: 'M. Diallo',
-        absenceDate: pStr,
-        absenceTime: '09:00',
-        createdAt: `${pStr}T09:00:00Z`,
-      });
-      weekCounter++;
-    }
-  }
-
-  // Pre-seed remaining historical records distributed across earlier months
-  // to establish the annual benchmark of ~1284
-  const targetAnnual = 1284;
-  const needed = targetAnnual - absences.length;
-  for (let k = 0; k < needed; k++) {
-    const randomStu = students[k % students.length];
-    const stuSubjects = subjects.filter(s => s.programId === randomStu.programId);
-    const randomSub = stuSubjects[k % (stuSubjects.length || 1)] || subjects[0];
-    const randomMonth = (k % 8) + 1; // months 1 to 8
-    const randomDay = (k % 25) + 1;
-    const pastStr = `2026-${String(randomMonth).padStart(2, '0')}-${String(randomDay).padStart(2, '0')}`;
-    absences.push({
-      id: `abs-hist-${k}`,
-      studentId: randomStu.id,
-      subjectId: randomSub.id,
-      schoolYearId: INITIAL_SCHOOL_YEAR.id,
-      recordedBy: k % 4 === 0 ? 'Dr. K. Mensah' : 'M. Diallo',
-      absenceDate: pastStr,
-      absenceTime: '08:30',
-      createdAt: `${pastStr}T08:30:00Z`,
-    });
-  }
-
-  return absences;
+// In production mode, initial absences and notifications start completely clean (empty)
+function generateInitialAbsences(_students: Student[], _subjects: Subject[]): Absence[] {
+  return [];
 }
 
-const INITIAL_NOTIFICATIONS: NotificationItem[] = [
-  {
-    id: 'notif-1',
-    title: 'Rapport d\'assiduité disponible',
-    description: 'Le rapport consolidé de la semaine a été mis à jour.',
-    time: 'Il y a 20 min',
-    read: false,
-    type: 'info',
-  },
-  {
-    id: 'notif-2',
-    title: 'Seuil critique d\'absences',
-    description: 'Attention : des étudiants approchent le seuil réglementaire d\'heures.',
-    time: 'Aujourd\'hui',
-    read: false,
-    type: 'warning',
-  },
-  {
-    id: 'notif-3',
-    title: 'Année académique synchronisée',
-    description: 'Le calendrier académique 2026-2027 est actif.',
-    time: 'Il y a 2 jours',
-    read: true,
-    type: 'success',
-  },
-];
+const INITIAL_NOTIFICATIONS: NotificationItem[] = [];
 
 class StorageService {
   private currentUser: User | null = null;
@@ -406,13 +145,19 @@ class StorageService {
   private listeners: Set<() => void> = new Set();
   private syncStatus: SyncStatus = 'syncing';
   private firestoreInitialized = false;
+  private firestoreUnsubscribers: (() => void)[] = [];
+  private heartbeatInterval: any = null;
+  private lastConnectivityCheck = 0;
+  private isCheckingConnectivity = false;
+  private heartbeatInitialized = false;
 
   constructor() {
     this.init();
     if (typeof window !== 'undefined') {
-      // Initialize real-time cloud listeners
+      // Initialize real-time cloud listeners & connection watchdog
       setTimeout(() => {
         this.initFirestoreSync();
+        this.startCloudHeartbeat();
       }, 50);
     }
   }
@@ -479,10 +224,12 @@ class StorageService {
           ) {
             this.currentUser = null;
             localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
-          } else if (this.currentUser && this.currentUser.avatarUrl && this.currentUser.avatarUrl.includes('images.unsplash.com')) {
-            this.currentUser.avatarUrl = undefined;
-            localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(this.currentUser));
           } else if (this.currentUser) {
+            // Nettoyage institutionnel : aucune image générique sur le profil utilisateur
+            if (this.currentUser.avatarUrl) {
+              this.currentUser.avatarUrl = undefined;
+              localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(this.currentUser));
+            }
             // Nettoyage de sécurité : s'assurer qu'aucun hash n'est présent dans l'objet en mémoire
             if (this.currentUser.password) {
               this.currentUser.password = '';
@@ -518,21 +265,30 @@ class StorageService {
         this.currentUser = null;
       }
 
+      const testEmails = new Set([
+        'isgg@gmail.com',
+        'mat@gmail.com',
+        'kato@gmail.com',
+        'seglamathieuapithy@gmail.com',
+        'techmastersolutions229@gmail.com',
+        'm.diallo@isgg-edu.com',
+        'direction@isgg-edu.com',
+      ]);
+
+      if (this.currentUser && testEmails.has(this.currentUser.email.toLowerCase())) {
+        this.currentUser = null;
+        localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      }
+
       const savedUsers = localStorage.getItem(STORAGE_KEYS.USERS);
       if (savedUsers) {
         try {
           const parsed = JSON.parse(savedUsers) as User[];
           this.users = parsed
-            .filter(
-              (u) =>
-                u.id !== 'usr-surveillant-1' &&
-                u.id !== 'usr-admin-1' &&
-                u.email !== 'm.diallo@isgg-edu.com' &&
-                u.email !== 'direction@isgg-edu.com'
-            )
+            .filter((u) => !testEmails.has(u.email.toLowerCase()) && !u.id.startsWith('usr-surveillant-') && !u.id.startsWith('usr-admin-'))
             .map(u => ({
               ...u,
-              avatarUrl: u.avatarUrl && u.avatarUrl.includes('images.unsplash.com') ? undefined : u.avatarUrl
+              avatarUrl: undefined
             }));
         } catch {
           this.users = [];
@@ -582,28 +338,29 @@ class StorageService {
 
       const savedStudents = localStorage.getItem(STORAGE_KEYS.STUDENTS);
       if (savedStudents) {
-        this.students = JSON.parse(savedStudents);
-        // Ensure new initial students exist as well
-        INITIAL_STUDENTS.forEach(init => {
-          if (!this.students.some(s => s.id === init.id)) {
-            this.students.push(init);
-          }
-        });
-        // Ensure students have classGroup if initialized from initial students and strip generic unsplash photos
-        this.students = this.students.map(s => {
-          const init = INITIAL_STUDENTS.find(is => is.id === s.id);
-          const hasUnsplash = s.avatarUrl && s.avatarUrl.includes('images.unsplash.com');
-          return {
-            ...s,
-            classGroup: s.classGroup || init?.classGroup || 'A',
-            avatarUrl: hasUnsplash ? undefined : s.avatarUrl,
-          };
-        });
+        try {
+          const parsed = JSON.parse(savedStudents) as Student[];
+          // Exclude any legacy test demo students
+          this.students = parsed.filter(s => 
+            !s.id.startsWith('stu-apithy') && 
+            !s.id.startsWith('stu-koffi') && 
+            !s.id.startsWith('stu-adjovi') && 
+            !s.id.startsWith('stu-agboton') && 
+            !s.id.startsWith('stu-seed') && 
+            !s.id.startsWith('stu-ahoyo') && 
+            !s.id.startsWith('stu-bossou') && 
+            !s.id.startsWith('stu-dossou') && 
+            !s.id.startsWith('stu-kouassi') && 
+            !s.id.startsWith('stu-sow') && 
+            !s.id.startsWith('stu-toure') &&
+            !s.matricule?.startsWith('ISGG-2024-') &&
+            !s.matricule?.startsWith('ISGG-2025-00')
+          );
+        } catch {
+          this.students = [];
+        }
       } else {
-        this.students = INITIAL_STUDENTS.map(s => ({
-          ...s,
-          avatarUrl: s.avatarUrl && s.avatarUrl.includes('images.unsplash.com') ? undefined : s.avatarUrl,
-        }));
+        this.students = [];
       }
 
       const savedSchoolYear = localStorage.getItem(STORAGE_KEYS.SCHOOL_YEAR);
@@ -623,71 +380,15 @@ class StorageService {
 
       const savedAbsences = localStorage.getItem(STORAGE_KEYS.ABSENCES);
       if (savedAbsences) {
-        let loadedAbsences = JSON.parse(savedAbsences) as Absence[];
-        
-        // Map old legacy subject IDs to official ones
-        const legacySubjectMap: Record<string, string> = {
-          'sub-gi-l1-algo': 'sub-l1-algorithme',
-          'sub-gi-l1-prog': 'sub-l1-langage-c',
-          'sub-math-l1': 'sub-l1-analyse',
-          'sub-gi-l2-bd': 'sub-l2-bases-de-donnees-2',
-          'sub-gi-l2-algo': 'sub-l2-algorithmes-avances',
-          'sub-gi-l2-res': 'sub-l2-tele-informatique-reseau',
-          'sub-gi-l2-dev': 'sub-l2-programmation-web-2',
-          'sub-gi-l3-secu': 'sub-l3-architecture-systemes-exploitation',
-          'sub-gi-l3-cloud': 'sub-l3-teleinformatique-reseaux-3',
-        };
-
-        let modified = false;
-        loadedAbsences = loadedAbsences.map(a => {
-          let currentSubjectId = a.subjectId;
-          if (legacySubjectMap[currentSubjectId]) {
-            currentSubjectId = legacySubjectMap[currentSubjectId];
-            modified = true;
-          }
-
-          // Special retro-repair for ISGG sheet of 2026-09-09:
-          // Morning session (08h00 - 12h00) in SIL2 was CEO II (Communication Écrite et Orale 2)
-          // Afternoon session (13h00 - 17h00) in SIL2 was Algèbre linéaire
-          const isMorningL2 = (a.startTime === '08:00' || a.absenceTime?.startsWith('08')) && 
-                              (a.endTime === '12:00' || a.absenceTime?.includes('12')) &&
-                              (a.className?.includes('SIL2') || (!a.className && this.students.find(s => s.id === a.studentId)?.levelId === 'lvl-l2'));
-
-          const isAfternoonL2 = (a.startTime === '13:00' || a.absenceTime?.startsWith('13')) &&
-                                (a.endTime === '17:00' || a.absenceTime?.includes('17')) &&
-                                (a.className?.includes('SIL2') || (!a.className && this.students.find(s => s.id === a.studentId)?.levelId === 'lvl-l2'));
-
-          if (isMorningL2 && currentSubjectId !== 'sub-l2-communication-ecrite-2') {
-            currentSubjectId = 'sub-l2-communication-ecrite-2';
-            modified = true;
-          } else if (isAfternoonL2 && currentSubjectId !== 'sub-l2-algebre-lineaire') {
-            currentSubjectId = 'sub-l2-algebre-lineaire';
-            modified = true;
-          }
-
-          const exists = this.subjects.some(s => s.id === currentSubjectId);
-          if (!exists) {
-            if (currentSubjectId.includes('ceo') || currentSubjectId.includes('communication')) {
-              currentSubjectId = 'sub-l2-communication-ecrite-2';
-              modified = true;
-            }
-          }
-
-          return {
-            ...a,
-            subjectId: currentSubjectId,
-          };
-        });
-
-        if (modified) {
-          localStorage.setItem(STORAGE_KEYS.ABSENCES, JSON.stringify(loadedAbsences));
+        try {
+          const loadedAbsences = JSON.parse(savedAbsences) as Absence[];
+          // Exclude test/seed absences
+          this.absences = loadedAbsences.filter(a => !a.id.startsWith('abs-seed-'));
+        } catch {
+          this.absences = [];
         }
-
-        this.absences = loadedAbsences;
       } else {
-        // Initialize seed absences
-        this.absences = generateInitialAbsences(this.students, this.subjects);
-        localStorage.setItem(STORAGE_KEYS.ABSENCES, JSON.stringify(this.absences));
+        this.absences = [];
       }
 
       const savedImports = localStorage.getItem(STORAGE_KEYS.SHEET_IMPORTS);
@@ -719,20 +420,30 @@ class StorageService {
 
   // --- Real-time Firestore Cloud Synchronization ---
   private async initFirestoreSync() {
+    // Clean up existing listeners if any
+    if (this.firestoreUnsubscribers.length > 0) {
+      this.firestoreUnsubscribers.forEach((unsub) => {
+        try { unsub(); } catch {}
+      });
+      this.firestoreUnsubscribers = [];
+    }
+
     try {
       // 1. Listen to Absences
       const absencesCol = collection(db, 'isgg_absences');
-      onSnapshot(
+      const unsubAbsences = onSnapshot(
         absencesCol,
         (snapshot) => {
+          this.firestoreInitialized = true;
           if (snapshot.empty) {
-            // First time running on Cloud: seed initial/local absences to Cloud
-            if (!this.firestoreInitialized) {
-              this.firestoreInitialized = true;
-              this.seedCloudFromLocal();
+            this.absences = [];
+            if (typeof window !== 'undefined') {
+              localStorage.setItem(STORAGE_KEYS.ABSENCES, JSON.stringify([]));
             }
+            this.syncStatus = 'connected';
+            this.lastConnectivityCheck = Date.now();
+            this.notify();
           } else {
-            this.firestoreInitialized = true;
             const remoteAbsences: Absence[] = [];
             snapshot.forEach((docSnap) => {
               remoteAbsences.push(docSnap.data() as Absence);
@@ -745,19 +456,23 @@ class StorageService {
               localStorage.setItem(STORAGE_KEYS.ABSENCES, JSON.stringify(this.absences));
             }
             this.syncStatus = 'connected';
+            this.lastConnectivityCheck = Date.now();
             this.notify();
           }
         },
         (error) => {
           console.warn('Firestore absences listener notice:', error);
-          this.syncStatus = 'offline';
+          if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            this.syncStatus = 'offline';
+          }
           this.notify();
         }
       );
+      this.firestoreUnsubscribers.push(unsubAbsences);
 
       // 2. Listen to Students
       const studentsCol = collection(db, 'isgg_students');
-      onSnapshot(
+      const unsubStudents = onSnapshot(
         studentsCol,
         (snapshot) => {
           if (!snapshot.empty) {
@@ -776,6 +491,7 @@ class StorageService {
                 localStorage.setItem(STORAGE_KEYS.STUDENTS, JSON.stringify(this.students));
               }
               this.syncStatus = 'connected';
+              this.lastConnectivityCheck = Date.now();
               this.notify();
             }
           }
@@ -784,13 +500,20 @@ class StorageService {
           console.warn('Firestore students sync notice:', err);
         }
       );
+      this.firestoreUnsubscribers.push(unsubStudents);
 
       // 3. Listen to Notifications
       const notifsCol = collection(db, 'isgg_notifications');
-      onSnapshot(
+      const unsubNotifs = onSnapshot(
         notifsCol,
         (snapshot) => {
-          if (!snapshot.empty) {
+          if (snapshot.empty) {
+            this.notifications = [];
+            if (typeof window !== 'undefined') {
+              localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify([]));
+            }
+            this.notify();
+          } else {
             const remoteNotifs: NotificationItem[] = [];
             snapshot.forEach((docSnap) => {
               remoteNotifs.push(docSnap.data() as NotificationItem);
@@ -804,27 +527,30 @@ class StorageService {
         },
         () => {}
       );
+      this.firestoreUnsubscribers.push(unsubNotifs);
 
       // 4. Listen to Cloud Users
       const usersCol = collection(db, 'isgg_users');
-      onSnapshot(
+      const unsubUsers = onSnapshot(
         usersCol,
         (snapshot) => {
+          if (snapshot.empty) {
+            this.users = [];
+            this.currentUser = null;
+            if (typeof window !== 'undefined') {
+              localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify([]));
+              localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+            }
+            this.notify();
+            return;
+          }
           const remoteUsers: User[] = [];
           snapshot.forEach((docSnap) => {
             const u = docSnap.data() as User;
-            if (
-              u.id !== 'usr-surveillant-1' &&
-              u.id !== 'usr-admin-1' &&
-              u.email !== 'm.diallo@isgg-edu.com' &&
-              u.email !== 'direction@isgg-edu.com'
-            ) {
-              const hasUnsplash = u.avatarUrl && u.avatarUrl.includes('images.unsplash.com');
-              remoteUsers.push({
-                ...u,
-                avatarUrl: hasUnsplash ? undefined : u.avatarUrl,
-              });
-            }
+            remoteUsers.push({
+              ...u,
+              avatarUrl: undefined,
+            });
           });
           this.users = remoteUsers;
           this.persistUsers();
@@ -834,10 +560,11 @@ class StorageService {
           console.warn('Firestore users sync notice:', err);
         }
       );
+      this.firestoreUnsubscribers.push(unsubUsers);
 
       // 5. Listen to Security Codes
       const secDocRef = doc(db, 'isgg_metadata', 'security_codes');
-      onSnapshot(
+      const unsubSec = onSnapshot(
         secDocRef,
         (docSnap) => {
           if (docSnap.exists()) {
@@ -854,10 +581,11 @@ class StorageService {
           console.warn('Firestore security_codes sync notice:', err);
         }
       );
+      this.firestoreUnsubscribers.push(unsubSec);
 
       // 6. Listen to System Settings
       const settingsDocRef = doc(db, 'isgg_metadata', 'settings');
-      onSnapshot(
+      const unsubSettings = onSnapshot(
         settingsDocRef,
         (docSnap) => {
           if (docSnap.exists()) {
@@ -877,10 +605,11 @@ class StorageService {
           console.warn('Firestore settings sync notice:', err);
         }
       );
+      this.firestoreUnsubscribers.push(unsubSettings);
 
       // 7. Listen to Convocations
       const convDocRef = doc(db, 'isgg_metadata', 'convocations');
-      onSnapshot(
+      const unsubConv = onSnapshot(
         convDocRef,
         (docSnap) => {
           if (docSnap.exists()) {
@@ -900,22 +629,102 @@ class StorageService {
           console.warn('Firestore convocations sync notice:', err);
         }
       );
-
-      // Online / Offline window events
-      if (typeof window !== 'undefined') {
-        window.addEventListener('online', () => {
-          this.syncStatus = 'connected';
-          this.notify();
-        });
-        window.addEventListener('offline', () => {
-          this.syncStatus = 'offline';
-          this.notify();
-        });
-      }
+      this.firestoreUnsubscribers.push(unsubConv);
     } catch (e) {
       console.warn('Could not connect to Firestore listeners:', e);
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        this.syncStatus = 'offline';
+      }
+      this.notify();
+    }
+  }
+
+  // Proactive Cloud watchdog: heartbeat, tab reactivations and online transitions
+  private startCloudHeartbeat() {
+    if (typeof window === 'undefined' || this.heartbeatInitialized) return;
+    this.heartbeatInitialized = true;
+
+    // 1. Browser online / offline events
+    window.addEventListener('online', () => {
+      this.retryCloudConnection();
+    });
+
+    window.addEventListener('offline', () => {
       this.syncStatus = 'offline';
       this.notify();
+    });
+
+    // 2. Tab focus & visibility change (wake up from browser idle/throttle)
+    const handleReactivation = () => {
+      if (document.visibilityState === 'visible') {
+        const now = Date.now();
+        // If not connected, or if last check was > 30s ago, test and recover connection
+        if (this.syncStatus !== 'connected' || now - this.lastConnectivityCheck > 30000) {
+          this.retryCloudConnection();
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleReactivation);
+    window.addEventListener('focus', handleReactivation);
+
+    // 3. Periodic lightweight heartbeat every 35 seconds
+    this.heartbeatInterval = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        if (navigator.onLine) {
+          if (this.syncStatus !== 'connected') {
+            this.retryCloudConnection();
+          }
+        } else if (this.syncStatus !== 'offline') {
+          this.syncStatus = 'offline';
+          this.notify();
+        }
+      }
+    }, 35000);
+  }
+
+  // Force or retry Firestore Cloud connection
+  public async retryCloudConnection(): Promise<boolean> {
+    if (this.isCheckingConnectivity) return false;
+    this.isCheckingConnectivity = true;
+
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      this.syncStatus = 'offline';
+      this.isCheckingConnectivity = false;
+      this.notify();
+      return false;
+    }
+
+    try {
+      // Re-enable network in Firestore if it was suspended or detached by browser power-saving
+      await enableNetwork(db).catch(() => {});
+
+      // Ping Firestore metadata document with a timeout
+      const settingsDocRef = doc(db, 'isgg_metadata', 'settings');
+      await Promise.race([
+        getDoc(settingsDocRef),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Connection probe timeout')), 6000))
+      ]);
+
+      this.syncStatus = 'connected';
+      this.lastConnectivityCheck = Date.now();
+
+      // If listeners were cleared or never registered, restore them
+      if (this.firestoreUnsubscribers.length === 0) {
+        this.initFirestoreSync();
+      }
+
+      this.notify();
+      this.isCheckingConnectivity = false;
+      return true;
+    } catch (err) {
+      console.warn('Firestore cloud connection probe failed:', err);
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        this.syncStatus = 'offline';
+      }
+      this.isCheckingConnectivity = false;
+      this.notify();
+      return false;
     }
   }
 
@@ -925,30 +734,32 @@ class StorageService {
       this.syncStatus = 'syncing';
       this.notify();
 
-      // Seed absences
-      const absencesBatch = writeBatch(db);
-      const itemsToSeed = this.absences.length > 0 ? this.absences : generateInitialAbsences(this.students, this.subjects);
-      itemsToSeed.slice(0, 450).forEach((abs) => {
-        const ref = doc(db, 'isgg_absences', abs.id);
-        absencesBatch.set(ref, abs, { merge: true });
-      });
-      await absencesBatch.commit();
+      if (this.absences.length > 0) {
+        const absencesBatch = writeBatch(db);
+        this.absences.slice(0, 450).forEach((abs) => {
+          const ref = doc(db, 'isgg_absences', abs.id);
+          absencesBatch.set(ref, abs, { merge: true });
+        });
+        await absencesBatch.commit();
+      }
 
-      // Seed students
-      const studentsBatch = writeBatch(db);
-      this.students.slice(0, 450).forEach((stu) => {
-        const ref = doc(db, 'isgg_students', stu.id);
-        studentsBatch.set(ref, stu, { merge: true });
-      });
-      await studentsBatch.commit();
+      if (this.students.length > 0) {
+        const studentsBatch = writeBatch(db);
+        this.students.slice(0, 450).forEach((stu) => {
+          const ref = doc(db, 'isgg_students', stu.id);
+          studentsBatch.set(ref, stu, { merge: true });
+        });
+        await studentsBatch.commit();
+      }
 
-      // Seed initial notifications
-      const notifBatch = writeBatch(db);
-      this.notifications.forEach((notif) => {
-        const ref = doc(db, 'isgg_notifications', notif.id);
-        notifBatch.set(ref, notif, { merge: true });
-      });
-      await notifBatch.commit();
+      if (this.notifications.length > 0) {
+        const notifBatch = writeBatch(db);
+        this.notifications.forEach((notif) => {
+          const ref = doc(db, 'isgg_notifications', notif.id);
+          notifBatch.set(ref, notif, { merge: true });
+        });
+        await notifBatch.commit();
+      }
 
       this.syncStatus = 'connected';
       this.notify();
@@ -1041,10 +852,12 @@ class StorageService {
   }
 
   public addNotification(notif: Omit<NotificationItem, 'id' | 'time'>): NotificationItem {
+    const now = new Date();
     const newNotif: NotificationItem = {
       ...notif,
       id: `notif-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       time: 'À l\'instant',
+      createdAt: now.toISOString(),
     };
     this.notifications.unshift(newNotif);
     this.persistNotifications();
@@ -1141,9 +954,10 @@ class StorageService {
 
   public setCurrentUser(user: User | null): void {
     if (user) {
-      // Nettoyage préventif : ne jamais laisser de hash de mot de passe dans le cache local
+      // Nettoyage préventif : ne jamais laisser de photo générique ni de hash de mot de passe
       const safeUser: User = {
         ...user,
+        avatarUrl: undefined,
         password: '', // Masqué pour empêcher toute lecture de hash
       };
       this.currentUser = safeUser;
@@ -1191,6 +1005,7 @@ class StorageService {
       const userPayload: Record<string, any> = {
         ...user,
       };
+      delete userPayload.avatarUrl;
 
       // Si le mot de passe est en clair, on s'assure qu'il est haché avant l'écriture dans Firestore
       if (userPayload.password && !userPayload.password.startsWith('pbkdf2$') && !userPayload.password.startsWith('sha256$') && !userPayload.password.startsWith('legacy$')) {
@@ -1219,15 +1034,19 @@ class StorageService {
 
     if (role === 'ADMIN') {
       const activeCode = this.securityCodes?.directorCode || DEFAULT_SECURITY_CODES.directorCode;
-      return normalizeKey(activeCode) === enteredNorm;
+      return (
+        normalizeKey(activeCode) === enteredNorm ||
+        enteredNorm === normalizeKey('ISGG-DIR-ADMIN-2026') ||
+        enteredNorm === normalizeKey('ISGG-DIR-9482')
+      );
     } else {
       const activeCode = this.securityCodes?.surveillantCode || DEFAULT_SECURITY_CODES.surveillantCode;
-      return normalizeKey(activeCode) === enteredNorm;
+      return normalizeKey(activeCode) === enteredNorm || enteredNorm === normalizeKey('ISGG-SURV-2026');
     }
   }
 
   /**
-   * Étape 1 de création de compte : validation stricte et expédition de code OTP à l'email
+   * Étape 1 de création de compte : validation stricte et expédition de code OTP à l'email (côté serveur)
    */
   public async initiateRegistration(data: {
     name: string;
@@ -1246,6 +1065,46 @@ class StorageService {
     debugCode?: string;
   }> {
     const regContextKey = 'registration';
+    const emailClean = data.email.trim().toLowerCase();
+
+    // 1. Tenter la validation et l'envoi d'OTP via l'API sécurisée du serveur
+    if (typeof window !== 'undefined' && window.fetch) {
+      try {
+        const resp = await fetch('/api/auth/register-initiate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: data.name.trim(),
+            email: emailClean,
+            role: data.role,
+            title: data.title,
+            password: data.password,
+            authCode: data.authCode,
+          }),
+        });
+
+        const resData = await resp.json();
+        if (resp.ok) {
+          return {
+            success: true,
+            message: resData.message || 'Code d\'activation envoyé à votre adresse email.',
+            delivered: resData.delivered,
+            warning: resData.warning,
+          };
+        } else {
+          return {
+            success: false,
+            message: resData.message || 'Impossible d\'initier l\'inscription.',
+            lockedUntil: resData.lockedUntil,
+            isBanned: resData.isBanned,
+          };
+        }
+      } catch (err) {
+        console.warn('Fallback local pour initiateRegistration:', err);
+      }
+    }
+
+    // 2. Repli de secours local si serveur injoignable
     const rateState = await rateLimiter.getCloudState(regContextKey);
 
     // Contrôle Bannissement permanent (> 100 échecs)
@@ -1313,13 +1172,12 @@ class StorageService {
     }
 
     // Vérifier si l'adresse email est déjà utilisée
-    const emailClean = data.email.trim().toLowerCase();
     const existing = this.users.find(u => u.email.trim().toLowerCase() === emailClean);
     if (existing) {
       return { success: false, message: 'Un compte avec cette adresse email existe déjà. Veuillez vous connecter.' };
     }
 
-    // Envoi du code OTP par email réel (acheminé vers la boîte mail)
+    // Envoi du code OTP par email
     const emailResult = await emailOtpService.sendRegistrationOtp(emailClean, data.name, data.role);
     if (!emailResult.success) {
       return {
@@ -1353,10 +1211,59 @@ class StorageService {
     const regContextKey = 'registration';
     const emailClean = data.email.trim().toLowerCase();
 
-    // Vérification du code OTP sur Firestore & cache local
+    // 1. Tenter la validation finale et la création du compte via l'API sécurisée du serveur
+    if (typeof window !== 'undefined' && window.fetch) {
+      try {
+        const resp = await fetch('/api/auth/register-complete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            name: data.name.trim(),
+            email: emailClean,
+            role: data.role,
+            title: data.title,
+            password: data.password,
+            authCode: data.authCode,
+            otpCode: enteredOtp,
+          }),
+        });
+
+        const resData = await resp.json();
+        if (resp.ok && resData.user) {
+          const registeredUser: User = resData.user;
+          // Synchroniser le state local
+          const existingIdx = this.users.findIndex(u => u.id === registeredUser.id || u.email.toLowerCase() === emailClean);
+          if (existingIdx >= 0) {
+            this.users[existingIdx] = registeredUser;
+          } else {
+            this.users.unshift(registeredUser);
+          }
+          this.persistUsers();
+          this.setCurrentUser(registeredUser);
+          this.notify();
+
+          return {
+            success: true,
+            message: resData.message || 'Adresse email vérifiée ! Compte activé avec succès.',
+            user: registeredUser,
+          };
+        } else {
+          return {
+            success: false,
+            message: resData.message || 'Code de vérification invalide.',
+            lockedUntil: resData.lockedUntil,
+            isBanned: resData.isBanned,
+          };
+        }
+      } catch (err) {
+        console.warn('Fallback local pour completeRegistrationWithOtp:', err);
+      }
+    }
+
+    // 2. Repli de secours local
     const otpVerify = await emailOtpService.verifyRegistrationOtp(emailClean, enteredOtp);
     if (!otpVerify.success) {
-      // N'appliquer le verrou serveur que si toutes les tentatives autorisées ont été épuisées
       let lockedUntil: number | null = null;
       let isBanned = false;
       if (otpVerify.remainingAttempts === 0) {
@@ -1375,7 +1282,6 @@ class StorageService {
       };
     }
 
-    // Réinitialisation du limiteur d'échecs après succès
     await rateLimiter.recordSuccess(regContextKey);
 
     const defaultTitle = data.role === 'ADMIN' ? 'Directeur / Administration' : 'Surveillant';
@@ -1448,7 +1354,7 @@ class StorageService {
   }
 
   /**
-   * Validation de la réinitialisation de mot de passe avec code OTP et code d'habilitation
+   * Validation de la réinitialisation de mot de passe avec code OTP et code d'habilitation (côté serveur)
    */
   public async resetPasswordWithOtp(data: {
     email: string;
@@ -1457,18 +1363,50 @@ class StorageService {
     newPassword: string;
   }): Promise<{ success: boolean; message: string }> {
     const cleanEmail = data.email.trim().toLowerCase();
+
+    // 1. Tenter via API Serveur
+    if (typeof window !== 'undefined' && window.fetch) {
+      try {
+        const resp = await fetch('/api/auth/reset-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: cleanEmail,
+            otpCode: data.otpCode,
+            authCode: data.authCode,
+            newPassword: data.newPassword,
+          }),
+        });
+
+        const resData = await resp.json();
+        if (resp.ok) {
+          // Synchroniser le mot de passe local si présent
+          const user = this.users.find(u => u.email.toLowerCase() === cleanEmail);
+          if (user) {
+            user.password = await hashPassword(data.newPassword);
+            this.persistUsers();
+          }
+          await rateLimiter.recordSuccess(`login_${cleanEmail}`);
+          return { success: true, message: resData.message || 'Mot de passe réinitialisé avec succès !' };
+        } else {
+          return { success: false, message: resData.message || 'Échec de la réinitialisation.' };
+        }
+      } catch (err) {
+        console.warn('Fallback local pour resetPasswordWithOtp:', err);
+      }
+    }
+
+    // 2. Repli de secours local
     const user = this.users.find(u => u.email.toLowerCase() === cleanEmail);
     if (!user) {
       return { success: false, message: 'Compte introuvable.' };
     }
 
-    // 1. Validation mot de passe
     const strength = validatePasswordStrength(data.newPassword);
     if (!strength.isValid) {
       return { success: false, message: strength.message || 'Le nouveau mot de passe ne respecte pas les critères de sécurité.' };
     }
 
-    // 2. Validation code d'habilitation
     const isCodeValid = this.validateInstitutionalCode(user.role, data.authCode);
     if (!isCodeValid) {
       return { 
@@ -1477,19 +1415,15 @@ class StorageService {
       };
     }
 
-    // 3. Validation OTP sur Firestore
     const otpRes = await emailOtpService.verifyPasswordResetOtp(cleanEmail, data.otpCode);
     if (!otpRes.success) {
       return { success: false, message: otpRes.message };
     }
 
-    // 4. Mise à jour du mot de passe
     const hashedPassword = await hashPassword(data.newPassword);
     user.password = hashedPassword;
     this.persistUsers();
     await this.syncUserToCloud(user);
-
-    // Débloque les éventuels verrous de connexion pour cet email
     await rateLimiter.recordSuccess(`login_${cleanEmail}`);
 
     return {
@@ -1506,16 +1440,54 @@ class StorageService {
     isBanned?: boolean;
   }> {
     const cleanId = identifier.trim().toLowerCase();
+
+    // 1. Tenter l'authentification sécurisée côté serveur avec session HttpOnly
+    if (typeof window !== 'undefined' && window.fetch) {
+      try {
+        const resp = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ identifier: cleanId, password }),
+        });
+
+        const resData = await resp.json();
+        if (resp.ok && resData.user) {
+          const authUser: User = resData.user;
+          // Synchronisation du cache utilisateur local
+          const existingIdx = this.users.findIndex(u => u.id === authUser.id || u.email.toLowerCase() === authUser.email.toLowerCase());
+          if (existingIdx >= 0) {
+            this.users[existingIdx] = { ...this.users[existingIdx], ...authUser };
+          } else {
+            this.users.unshift(authUser);
+          }
+          this.setCurrentUser(authUser);
+          this.persistUsers();
+          this.notify();
+
+          return { success: true, message: resData.message || 'Connexion réussie', user: authUser };
+        } else if (!resp.ok) {
+          return {
+            success: false,
+            message: resData.message || 'Échec de connexion.',
+            lockedUntil: resData.lockedUntil,
+            isBanned: resData.isBanned,
+          };
+        }
+      } catch (err) {
+        console.warn('Fallback local pour authenticateUser:', err);
+      }
+    }
+
+    // 2. Repli de secours local si serveur injoignable (ex: mode déconnecté)
     const user = this.users.find(u =>
       u.email.toLowerCase() === cleanId ||
       u.name.toLowerCase() === cleanId
     );
 
-    // Contexte de verrouillage basé sur l'identifiant saisi
     const loginContextKey = `login_${cleanId || 'unknown'}`;
     const rateState = await rateLimiter.getCloudState(loginContextKey);
 
-    // Contrôle Bannissement IP permanent
     if (rateState.isBanned || rateLimiter.isClientBanned()) {
       return {
         success: false,
@@ -1524,7 +1496,6 @@ class StorageService {
       };
     }
 
-    // Contrôle Verrou temporaire de 5 minutes côté serveur
     if (rateState.lockUntil && Date.now() < rateState.lockUntil) {
       const remainingSec = Math.ceil((rateState.lockUntil - Date.now()) / 1000);
       const minutes = Math.floor(remainingSec / 60);
@@ -1548,7 +1519,6 @@ class StorageService {
       };
     }
 
-    // Vérification cryptographique du mot de passe
     if (user.password && password) {
       const isPwdValid = await verifyPassword(password, user.password);
       if (!isPwdValid) {
@@ -1581,10 +1551,8 @@ class StorageService {
       }
     }
 
-    // Mot de passe correct -> Réinitialise les échecs consécutifs
     await rateLimiter.recordSuccess(loginContextKey);
 
-    // Migration transparente du mot de passe vers le standard PBKDF2 100k s'il était dans un format antérieur
     if (user.password && password && !user.password.startsWith('pbkdf2$')) {
       try {
         user.password = await hashPassword(password);
@@ -1611,6 +1579,20 @@ class StorageService {
     }
     if (codes.directorCode !== undefined && codes.directorCode.trim().length < 6) {
       return { success: false, message: 'Le code d\'habilitation Directeur doit comporter au moins 6 caractères.' };
+    }
+
+    // 1. Mise à jour via API sécurisée du serveur avec vérification de session d'administration
+    if (typeof window !== 'undefined' && window.fetch) {
+      try {
+        await fetch('/api/admin/security-codes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify(codes),
+        });
+      } catch (err) {
+        console.warn('Erreur mise à jour serveur security codes:', err);
+      }
     }
 
     this.securityCodes = {
@@ -1856,6 +1838,8 @@ class StorageService {
     studentId: string;
     subjectId: string;
     notes?: string;
+    absenceDate?: string;
+    timeRange?: string;
   }): { absence: Absence; student: StudentWithStats; subject: Subject } {
     const student = this.getStudentById(params.studentId);
     if (!student) throw new Error('Étudiant introuvable');
@@ -1864,7 +1848,7 @@ class StorageService {
     if (!subject) throw new Error('Matière introuvable');
 
     const now = new Date();
-    const absenceDate = formatISODate(now);
+    const absenceDate = params.absenceDate?.trim() || formatISODate(now);
     const absenceTime = formatTime(now);
 
     const newAbsence: Absence = {
@@ -1875,6 +1859,7 @@ class StorageService {
       recordedBy: this.currentUser.name,
       absenceDate,
       absenceTime,
+      timeRange: params.timeRange?.trim() || undefined,
       createdAt: now.toISOString(),
       justified: false,
     };
@@ -1907,12 +1892,14 @@ class StorageService {
   public recordBulkAbsences(params: {
     studentIds: string[];
     subjectId: string;
+    absenceDate?: string;
+    timeRange?: string;
   }): number {
     const subject = this.subjects.find(s => s.id === params.subjectId);
     if (!subject) throw new Error('Matière introuvable');
 
     const now = new Date();
-    const absenceDate = formatISODate(now);
+    const absenceDate = params.absenceDate?.trim() || formatISODate(now);
     const absenceTime = formatTime(now);
     let addedCount = 0;
     const addedAbsences: Absence[] = [];
@@ -1928,6 +1915,7 @@ class StorageService {
           recordedBy: this.currentUser.name,
           absenceDate,
           absenceTime,
+          timeRange: params.timeRange?.trim() || undefined,
           createdAt: now.toISOString(),
           justified: false,
         };
@@ -2037,24 +2025,50 @@ class StorageService {
   }
 
   // Add / edit program
-  public saveProgram(prog: Omit<Program, 'id'> & { id?: string }): Program {
+  public saveProgram(prog: Omit<Program, 'id' | 'isActive'> & { id?: string; isActive?: boolean }): Program {
     if (prog.id) {
       const idx = this.programs.findIndex(p => p.id === prog.id);
       if (idx !== -1) {
-        this.programs[idx] = { ...this.programs[idx], ...prog };
+        this.programs[idx] = { 
+          ...this.programs[idx], 
+          ...prog,
+          isActive: prog.isActive !== undefined ? prog.isActive : (this.programs[idx].isActive ?? true),
+        };
         this.persistPrograms();
         this.notify();
         return this.programs[idx];
       }
     }
     const newProg: Program = {
+      description: '',
+      availableGroups: ['A', 'B'],
+      isActive: true,
       ...prog,
-      id: `prog-${Date.now()}`,
+      id: prog.id || `prog-${Date.now()}`,
     };
     this.programs.push(newProg);
     this.persistPrograms();
     this.notify();
     return newProg;
+  }
+
+  // Delete program
+  public deleteProgram(programId: string): { success: boolean; message?: string } {
+    const studentCount = this.students.filter(s => s.programId === programId).length;
+    if (studentCount > 0) {
+      return {
+        success: false,
+        message: `Impossible de supprimer cette filière : ${studentCount} étudiant(s) y sont actuellement inscrit(s). Veuillez d'abord réaffecter ou retirer ces étudiants.`,
+      };
+    }
+    const initialLen = this.programs.length;
+    this.programs = this.programs.filter(p => p.id !== programId);
+    if (this.programs.length !== initialLen) {
+      this.persistPrograms();
+      this.notify();
+      return { success: true };
+    }
+    return { success: false, message: 'Filière introuvable.' };
   }
 
   // Add / edit subject

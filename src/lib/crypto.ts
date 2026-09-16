@@ -165,8 +165,11 @@ export async function verifyPassword(plainText: string, storedHashOrPlain: strin
 
 /**
  * Clé maîtresse de dérivation pour le chiffrement symétrique AES-GCM
+ * Dérivée préférentiellement de la variable d'environnement VITE_ENCRYPTION_KEY
  */
-const ISGG_SECRET_PASSPHRASE = 'ISGG_INSTITUTIONAL_AES_GCM_ENCRYPTION_KEY_SECRET_STUDIES_2026';
+const ISGG_SECRET_PASSPHRASE = 
+  (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_ENCRYPTION_KEY) ||
+  'ISGG_INSTITUTIONAL_AES_GCM_ENCRYPTION_KEY_SECRET_STUDIES_2026';
 
 async function deriveKey(): Promise<CryptoKey | null> {
   if (typeof crypto === 'undefined' || !crypto.subtle) return null;
@@ -194,14 +197,34 @@ async function deriveKey(): Promise<CryptoKey | null> {
 
 /**
  * Chiffrement symétrique strict AES-GCM 256 bits
- * Produit un token au format: `enc:v1:<iv_hex>:<ciphertext_hex>`
+ * Tente d'abord le chiffrement serveur (AES-256-GCM v2) puis fallback Web Crypto API local (v1)
  */
 export async function encryptSensitiveData(plainText: string): Promise<string> {
   if (!plainText) return plainText;
+
+  // 1. Chiffrement via API Serveur si disponible
+  if (typeof window !== 'undefined' && window.fetch) {
+    try {
+      const resp = await fetch('/api/crypto/encrypt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: plainText }),
+      });
+      if (resp.ok) {
+        const json = await resp.json();
+        if (json.success && json.encrypted) {
+          return json.encrypted;
+        }
+      }
+    } catch {
+      // Fallback local Web Crypto si hors-ligne ou erreur réseau
+    }
+  }
+
+  // 2. Chiffrement local Web Crypto AES-GCM (v1)
   try {
     const key = await deriveKey();
     if (!key || typeof crypto === 'undefined') {
-      // Fallback obfuscation Base64 si Web Crypto indisponible
       return 'b64:' + btoa(encodeURIComponent(plainText));
     }
     const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -215,13 +238,13 @@ export async function encryptSensitiveData(plainText: string): Promise<string> {
     const cipherHex = Array.from(new Uint8Array(cipherBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
     return `enc:v1:${ivHex}:${cipherHex}`;
   } catch (err) {
-    console.warn('Erreur lors du chiffrement des données:', err);
+    console.warn('Erreur lors du chiffrement local des données:', err);
     return plainText;
   }
 }
 
 /**
- * Déchiffrement symétrique strict AES-GCM 256 bits
+ * Déchiffrement symétrique strict AES-GCM 256 bits (supporte v2 serveur et v1 local)
  */
 export async function decryptSensitiveData(encryptedText: string): Promise<string> {
   if (!encryptedText) return encryptedText;
@@ -234,8 +257,27 @@ export async function decryptSensitiveData(encryptedText: string): Promise<strin
     }
   }
 
+  // Déchiffrement v2 (serveur)
+  if (encryptedText.startsWith('enc:v2:') && typeof window !== 'undefined' && window.fetch) {
+    try {
+      const resp = await fetch('/api/crypto/decrypt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ encryptedText }),
+      });
+      if (resp.ok) {
+        const json = await resp.json();
+        if (json.success && json.decrypted !== undefined) {
+          return json.decrypted;
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  // Déchiffrement v1 (local Web Crypto)
   if (!encryptedText.startsWith('enc:v1:')) {
-    // Ce n'était pas une donnée chiffrée
     return encryptedText;
   }
 

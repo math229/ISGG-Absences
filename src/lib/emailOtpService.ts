@@ -78,7 +78,7 @@ class EmailOtpService {
   }
 
   /**
-   * Expédie un code OTP par email réel pour la vérification à l'inscription
+   * Expédie un code OTP par email réel pour la vérification à l'inscription (généré et stocké côté serveur)
    */
   public async sendRegistrationOtp(
     email: string, 
@@ -86,375 +86,154 @@ class EmailOtpService {
     role?: string
   ): Promise<DispatchResult> {
     const cleanEmail = email.trim().toLowerCase();
-    const code = this.generate6DigitCode();
-    const expiresAt = Date.now() + 15 * 60 * 1000; // 15 minutes
-    const docKey = cleanEmail.replace(/[\.\:\/@]/g, '_');
 
-    // Récupérer les codes précédemment émis pour cet utilisateur s'ils sont encore récents
-    let recentCodes: string[] = [];
+    // Appel direct de l'API serveur sécurisée (code chiffré/haché côté serveur, jamais exposé sur le client)
     try {
-      const snap = await getDoc(doc(db, 'isgg_email_verifications', docKey));
-      if (snap.exists()) {
-        const prevData = snap.data() as OtpRecord;
-        if (prevData && prevData.code) {
-          recentCodes.push(prevData.code);
-        }
-        if (prevData && Array.isArray(prevData.validCodes)) {
-          recentCodes.push(...prevData.validCodes);
-        }
-      }
-    } catch {
-      // ignore
-    }
-
-    // Inclure le code actuel + anciens codes valides récents
-    const allValidCodes = Array.from(new Set([code, ...recentCodes])).filter(Boolean);
-
-    const record: OtpRecord = {
-      email: cleanEmail,
-      code,
-      validCodes: allValidCodes,
-      purpose: 'REGISTRATION',
-      expiresAt,
-      attempts: 0,
-      verified: false,
-      createdAt: new Date().toISOString(),
-    };
-
-    try {
-      // 1. Sauvegarde sécurisée dans Firestore
-      await setDoc(doc(db, 'isgg_email_verifications', docKey), record);
-
-      // Cache de secours local
-      try {
-        if (typeof window !== 'undefined') {
-          localStorage.setItem(`isgg_otp_${docKey}`, JSON.stringify(record));
-        }
-      } catch {}
-
-      // 2. Journaliser l'événement d'envoi
-      const eventId = `mail-${Date.now()}`;
-      await setDoc(doc(db, 'isgg_dispatched_emails', eventId), {
-        id: eventId,
-        to: cleanEmail,
-        purpose: 'REGISTRATION',
-        recipientName: userName,
-        role: role || 'SURVEILLANT',
-        sentAt: new Date().toISOString(),
-        expiresInMinutes: 15,
+      const response = await fetch('/api/otp/send-registration', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          name: userName,
+          role,
+        }),
       });
 
-      // 3. Expédition réelle par le serveur de messagerie institutionnel
-      const timeStr = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-      const dispatchRes = await this.dispatchServerEmail({
-        to: cleanEmail,
-        code,
-        purpose: 'REGISTRATION',
-        recipientName: userName,
-        role,
-        subject: `[ISGG] Code d'activation : ${code} (${timeStr})`,
-      });
-
-      let userMsg = `Un email officiel contenant votre code de vérification à 6 chiffres a été envoyé à ${cleanEmail}. (Validité : 15 minutes).`;
-      if (!dispatchRes.delivered) {
-        if (dispatchRes.warning === 'SMTP_NOT_CONFIGURED') {
-          userMsg = `Note de configuration : Les paramètres SMTP d'envoi d'emails (SMTP_HOST, SMTP_USER, SMTP_PASS) ne sont pas encore renseignés dans les Paramètres du projet.`;
-        } else if (dispatchRes.warning === 'SMTP_CONFIG_ERROR') {
-          userMsg = `Erreur SMTP : ${dispatchRes.smtpError || 'Impossible de se connecter au serveur email de l\'établissement'}.`;
-        }
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          delivered: false,
+          message: data.message || 'Impossible d\'expédier le code de vérification.',
+        };
       }
 
       return {
         success: true,
-        delivered: dispatchRes.delivered,
-        warning: dispatchRes.warning,
-        smtpError: dispatchRes.smtpError,
-        message: userMsg,
+        delivered: !!data.delivered,
+        warning: data.warning,
+        smtpError: data.smtpError,
+        message: data.message || `Un email contenant votre code officiel à 6 chiffres a été envoyé à ${cleanEmail}.`,
       };
     } catch (err) {
-      console.warn('Erreur envoi OTP Firestore:', err);
+      console.warn('Erreur appel /api/otp/send-registration:', err);
       return {
         success: false,
         delivered: false,
-        message: 'Impossible de générer le code de vérification. Veuillez vérifier votre connexion.',
+        message: 'Erreur réseau lors de la génération du code de vérification.',
       };
     }
   }
 
   /**
-   * Vérifie le code OTP saisi pour l'inscription
+   * Vérifie le code OTP saisi pour l'inscription (validation en temps constant côté serveur)
    */
   public async verifyRegistrationOtp(email: string, enteredCode: string): Promise<{ success: boolean; message: string; remainingAttempts?: number }> {
     const cleanEmail = email.trim().toLowerCase();
     const cleanEntered = enteredCode.replace(/\D/g, '').trim();
-    const docKey = cleanEmail.replace(/[\.\:\/@]/g, '_');
 
     try {
-      let data: OtpRecord | null = null;
-      try {
-        const snap = await getDoc(doc(db, 'isgg_email_verifications', docKey));
-        if (snap.exists()) {
-          data = snap.data() as OtpRecord;
-        }
-      } catch (e) {
-        console.warn('Erreur lecture Firestore OTP:', e);
-      }
+      const response = await fetch('/api/otp/verify-registration', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          code: cleanEntered,
+        }),
+      });
 
-      // Secours local
-      if (!data && typeof window !== 'undefined') {
-        try {
-          const cached = localStorage.getItem(`isgg_otp_${docKey}`);
-          if (cached) data = JSON.parse(cached);
-        } catch {}
-      }
-
-      if (!data) {
+      const data = await response.json();
+      if (!response.ok) {
         return {
           success: false,
-          message: 'Aucun code de vérification actif pour cette adresse email. Veuillez renvoyer un code.',
+          message: data.message || 'Code de vérification invalide.',
+          remainingAttempts: data.remainingAttempts,
         };
       }
-
-      // 1. Vérification de l'expiration (avec marge de 5 minutes)
-      if (Date.now() > data.expiresAt + 5 * 60 * 1000) {
-        return {
-          success: false,
-          message: 'Ce code de vérification a expiré. Veuillez cliquer sur "Renvoyer un code".',
-        };
-      }
-
-      // 2. Vérification du nombre maximal de tentatives (5 échecs)
-      if ((data.attempts || 0) >= 5) {
-        return {
-          success: false,
-          message: 'Nombre maximal de tentatives atteint. Veuillez cliquer sur "Renvoyer un nouveau code".',
-        };
-      }
-
-      // 3. Vérification de correspondance (accepte code principal ou code récent valide)
-      const validPool = [
-        data.code,
-        ...(data.validCodes || [])
-      ].map(c => (c || '').replace(/\D/g, '').trim()).filter(Boolean);
-
-      const isMatch = validPool.includes(cleanEntered);
-
-      if (!isMatch) {
-        const nextAttempts = (data.attempts || 0) + 1;
-        try {
-          await updateDoc(doc(db, 'isgg_email_verifications', docKey), {
-            attempts: nextAttempts,
-          });
-        } catch {}
-
-        const remaining = Math.max(0, 5 - nextAttempts);
-        return {
-          success: false,
-          message: `Code de vérification incorrect. Il vous reste ${remaining} tentative${remaining > 1 ? 's' : ''}.`,
-          remainingAttempts: remaining,
-        };
-      }
-
-      // Succès !
-      try {
-        await updateDoc(doc(db, 'isgg_email_verifications', docKey), {
-          verified: true,
-          verifiedAt: new Date().toISOString(),
-          attempts: 0,
-        });
-      } catch {}
-
-      try {
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem(`isgg_otp_${docKey}`);
-        }
-      } catch {}
 
       return {
         success: true,
-        message: 'Adresse email vérifiée avec succès !',
+        message: data.message || 'Adresse email vérifiée avec succès !',
       };
     } catch (err) {
-      console.warn('Erreur vérification OTP:', err);
+      console.warn('Erreur appel /api/otp/verify-registration:', err);
       return {
         success: false,
-        message: 'Erreur technique lors de la vérification du code.',
+        message: 'Erreur de communication avec le serveur de vérification.',
       };
     }
   }
 
   /**
-   * Expédie un code OTP pour la réinitialisation de mot de passe oublié
+   * Expédie un code OTP pour la réinitialisation de mot de passe (généré côté serveur)
    */
   public async sendPasswordResetOtp(email: string): Promise<DispatchResult> {
     const cleanEmail = email.trim().toLowerCase();
-    const code = this.generate6DigitCode();
-    const expiresAt = Date.now() + 15 * 60 * 1000; // 15 minutes
-    const docKey = cleanEmail.replace(/[\.\:\/@]/g, '_');
-
-    let recentCodes: string[] = [];
-    try {
-      const snap = await getDoc(doc(db, 'isgg_password_resets', docKey));
-      if (snap.exists()) {
-        const prevData = snap.data() as OtpRecord;
-        if (prevData && prevData.code) recentCodes.push(prevData.code);
-        if (prevData && Array.isArray(prevData.validCodes)) recentCodes.push(...prevData.validCodes);
-      }
-    } catch {}
-
-    const allValidCodes = Array.from(new Set([code, ...recentCodes])).filter(Boolean);
-
-    const record: OtpRecord = {
-      email: cleanEmail,
-      code,
-      validCodes: allValidCodes,
-      purpose: 'PASSWORD_RESET',
-      expiresAt,
-      attempts: 0,
-      verified: false,
-      createdAt: new Date().toISOString(),
-    };
 
     try {
-      // 1. Sauvegarde dans Firestore
-      await setDoc(doc(db, 'isgg_password_resets', docKey), record);
-
-      try {
-        if (typeof window !== 'undefined') {
-          localStorage.setItem(`isgg_reset_otp_${docKey}`, JSON.stringify(record));
-        }
-      } catch {}
-
-      // 2. Journaliser l'événement d'envoi
-      const eventId = `pwd-reset-${Date.now()}`;
-      await setDoc(doc(db, 'isgg_dispatched_emails', eventId), {
-        id: eventId,
-        to: cleanEmail,
-        purpose: 'PASSWORD_RESET',
-        sentAt: new Date().toISOString(),
-        expiresInMinutes: 15,
+      const response = await fetch('/api/otp/send-password-reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail }),
       });
 
-      // 3. Expédition réelle par le serveur de messagerie
-      const timeStr = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-      const dispatchRes = await this.dispatchServerEmail({
-        to: cleanEmail,
-        code,
-        purpose: 'PASSWORD_RESET',
-        subject: `[ISGG] Réinitialisation de votre mot de passe : ${code} (${timeStr})`,
-      });
-
-      let userMsg = `Un email avec votre code de réinitialisation sécurisé a été expédié à ${cleanEmail}.`;
-      if (!dispatchRes.delivered) {
-        if (dispatchRes.warning === 'SMTP_NOT_CONFIGURED') {
-          userMsg = `Note de configuration : Les paramètres SMTP d'envoi d'emails (SMTP_HOST, SMTP_USER, SMTP_PASS) ne sont pas encore renseignés dans les Paramètres du projet.`;
-        } else if (dispatchRes.warning === 'SMTP_CONFIG_ERROR') {
-          userMsg = `Erreur SMTP : ${dispatchRes.smtpError || 'Impossible de se connecter au serveur email'}.`;
-        }
+      const data = await response.json();
+      if (!response.ok) {
+        return {
+          success: false,
+          delivered: false,
+          message: data.message || 'Impossible d\'expédier le code de réinitialisation.',
+        };
       }
 
       return {
         success: true,
-        delivered: dispatchRes.delivered,
-        warning: dispatchRes.warning,
-        smtpError: dispatchRes.smtpError,
-        message: userMsg,
+        delivered: !!data.delivered,
+        warning: data.warning,
+        smtpError: data.smtpError,
+        message: data.message || `Code de réinitialisation envoyé avec succès à ${cleanEmail}.`,
       };
     } catch (err) {
-      console.warn('Erreur envoi reset OTP Firestore:', err);
+      console.warn('Erreur appel /api/otp/send-password-reset:', err);
       return {
         success: false,
         delivered: false,
-        message: 'Impossible de générer le code de réinitialisation.',
+        message: 'Impossible de joindre le serveur pour la réinitialisation.',
       };
     }
   }
 
   /**
-   * Vérifie le code OTP de réinitialisation de mot de passe
+   * Vérifie le code OTP de réinitialisation de mot de passe (côté serveur)
    */
   public async verifyPasswordResetOtp(email: string, enteredCode: string): Promise<{ success: boolean; message: string }> {
     const cleanEmail = email.trim().toLowerCase();
     const cleanEntered = enteredCode.replace(/\D/g, '').trim();
-    const docKey = cleanEmail.replace(/[\.\:\/@]/g, '_');
 
     try {
-      let data: OtpRecord | null = null;
-      try {
-        const snap = await getDoc(doc(db, 'isgg_password_resets', docKey));
-        if (snap.exists()) {
-          data = snap.data() as OtpRecord;
-        }
-      } catch {}
+      const response = await fetch('/api/otp/verify-password-reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: cleanEmail,
+          code: cleanEntered,
+        }),
+      });
 
-      if (!data && typeof window !== 'undefined') {
-        try {
-          const cached = localStorage.getItem(`isgg_reset_otp_${docKey}`);
-          if (cached) data = JSON.parse(cached);
-        } catch {}
-      }
-
-      if (!data) {
+      const data = await response.json();
+      if (!response.ok) {
         return {
           success: false,
-          message: 'Aucune demande de réinitialisation active pour cet email.',
+          message: data.message || 'Code de réinitialisation invalide.',
         };
       }
-
-      if (Date.now() > data.expiresAt + 5 * 60 * 1000) {
-        return {
-          success: false,
-          message: 'Ce code de réinitialisation a expiré. Veuillez recommencer la procédure.',
-        };
-      }
-
-      if ((data.attempts || 0) >= 5) {
-        return {
-          success: false,
-          message: 'Trop de tentatives erronées (5). Veuillez demander un nouveau code.',
-        };
-      }
-
-      const validPool = [
-        data.code,
-        ...(data.validCodes || [])
-      ].map(c => (c || '').replace(/\D/g, '').trim()).filter(Boolean);
-
-      const isMatch = validPool.includes(cleanEntered);
-
-      if (!isMatch) {
-        const nextAttempts = (data.attempts || 0) + 1;
-        try {
-          await updateDoc(doc(db, 'isgg_password_resets', docKey), {
-            attempts: nextAttempts,
-          });
-        } catch {}
-        const remaining = Math.max(0, 5 - nextAttempts);
-        return {
-          success: false,
-          message: `Code incorrect. Plus que ${remaining} tentative${remaining > 1 ? 's' : ''}.`,
-        };
-      }
-
-      try {
-        await updateDoc(doc(db, 'isgg_password_resets', docKey), {
-          verified: true,
-          attempts: 0,
-        });
-      } catch {}
-
-      try {
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem(`isgg_reset_otp_${docKey}`);
-        }
-      } catch {}
 
       return {
         success: true,
-        message: 'Code validé avec succès.',
+        message: data.message || 'Code validé avec succès.',
       };
     } catch (err) {
-      console.warn('Erreur verifyPasswordResetOtp:', err);
+      console.warn('Erreur appel /api/otp/verify-password-reset:', err);
       return {
         success: false,
         message: 'Erreur technique lors de la vérification du code de réinitialisation.',

@@ -59,6 +59,14 @@ export const NewAbsenceView: React.FC<NewAbsenceViewProps> = ({ onViewStudentHis
   const [selectedLevelId, setSelectedLevelId] = useState<string>('lvl-l1');
   const [selectedSubjectId, setSelectedSubjectId] = useState<string>('sub-l1-analyse');
   const [selectedGroup, setSelectedGroup] = useState<string>('all'); // 'all' | 'A' | 'B' | ...
+  const [selectedTimeRange, setSelectedTimeRange] = useState<string>('08 H - 12 H');
+  const [selectedDate, setSelectedDate] = useState<string>(() => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  });
 
   // Available groups for current program
   const availableGroups = useMemo(() => {
@@ -147,9 +155,10 @@ export const NewAbsenceView: React.FC<NewAbsenceViewProps> = ({ onViewStudentHis
       const result = storage.recordAbsence({
         studentId: selectedStudent.id,
         subjectId: selectedSubjectId,
+        absenceDate: selectedDate || undefined,
+        timeRange: selectedTimeRange || undefined,
       });
 
-      const now = new Date();
       const frenchDate = formatFrenchDate(result.absence.absenceDate);
 
       // 1. Show elegant toast matching step 26
@@ -157,7 +166,7 @@ export const NewAbsenceView: React.FC<NewAbsenceViewProps> = ({ onViewStudentHis
         studentName: `${result.student.lastName} ${result.student.firstName}`,
         subjectName: result.subject.name,
         dateStr: frenchDate,
-        timeStr: result.absence.absenceTime,
+        timeStr: result.absence.timeRange || result.absence.absenceTime,
         annualCount: result.student.annualAbsenceCount,
       });
 
@@ -202,6 +211,8 @@ export const NewAbsenceView: React.FC<NewAbsenceViewProps> = ({ onViewStudentHis
       const recorded = storage.recordBulkAbsences({
         studentIds: Array.from(selectedStudentIds),
         subjectId: selectedSubjectId,
+        absenceDate: selectedDate || undefined,
+        timeRange: selectedTimeRange || undefined,
       });
 
       showToast(
@@ -427,164 +438,201 @@ export const NewAbsenceView: React.FC<NewAbsenceViewProps> = ({ onViewStudentHis
         </div>
       </div>
 
-      {/* Context Selection Form + Information Card (Panel 3 form) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Dropdowns Card */}
-        <div className="lg:col-span-8 bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-5">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Filière */}
-            <div>
-              <label 
-                htmlFor="select-program"
-                className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1"
-              >
-                <span>Filière</span>
-                <span className="text-[#EA580C]">*</span>
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                  <Building className="w-4 h-4 text-[#EA580C]" />
-                </div>
-                <select
-                  id="select-program"
-                  value={selectedProgramId}
-                  onChange={e => {
-                    setSelectedProgramId(e.target.value);
-                    setSelectedGroup('all');
-                  }}
-                  className="w-full pl-9 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#EA580C]/20 focus:border-[#EA580C] cursor-pointer"
-                >
-                  {programs.map(prog => (
-                    <option key={prog.id} value={prog.id}>
-                      {prog.name}
-                    </option>
-                  ))}
-                </select>
+      {/* Context Selection Form - Tous les champs sur la même ligne (6 colonnes sur grand écran) */}
+      <div className="bg-white rounded-2xl p-5 sm:p-6 border border-slate-200/80 shadow-xs space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3.5">
+          {/* 1. Filière */}
+          <div>
+            <label 
+              htmlFor="select-program"
+              className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1"
+            >
+              <span>Filière</span>
+              <span className="text-[#EA580C]">*</span>
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                <Building className="w-4 h-4 text-[#EA580C]" />
               </div>
-            </div>
-
-            {/* Classe / Groupe (ex: A, B, C...) */}
-            <div>
-              <label 
-                htmlFor="select-group"
-                className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between"
+              <select
+                id="select-program"
+                value={selectedProgramId}
+                onChange={e => {
+                  setSelectedProgramId(e.target.value);
+                  setSelectedGroup('all');
+                }}
+                className="w-full pl-8 pr-6 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#EA580C]/20 focus:border-[#EA580C] cursor-pointer truncate"
               >
-                <div className="flex items-center gap-1">
-                  <span>Classe / Groupe</span>
-                  <span className="text-[#EA580C]">*</span>
-                </div>
-                <span className="text-[10px] text-slate-400 font-normal">
-                  {availableGroups.length > 1 ? `${availableGroups.length} groupes` : 'Classe unique'}
-                </span>
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                  <Users className="w-4 h-4 text-[#EA580C]" />
-                </div>
-                <select
-                  id="select-group"
-                  value={selectedGroup}
-                  onChange={e => setSelectedGroup(e.target.value)}
-                  className="w-full pl-9 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#EA580C]/20 focus:border-[#EA580C] cursor-pointer"
-                >
-                  <option value="all">Tous les groupes ({availableGroups.join(', ')})</option>
-                  {availableGroups.map(grp => (
-                    <option key={grp} value={grp}>
-                      {currentProgram?.name} {grp} (Classe {grp})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Année d'étude */}
-            <div>
-              <label 
-                htmlFor="select-level"
-                className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1"
-              >
-                <span>Année d&apos;étude</span>
-                <span className="text-[#EA580C]">*</span>
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                  <GraduationCap className="w-4 h-4 text-[#EA580C]" />
-                </div>
-                <select
-                  id="select-level"
-                  value={selectedLevelId}
-                  onChange={e => setSelectedLevelId(e.target.value)}
-                  className="w-full pl-9 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#EA580C]/20 focus:border-[#EA580C] cursor-pointer"
-                >
-                  {levels.map(lvl => (
-                    <option key={lvl.id} value={lvl.id}>
-                      {lvl.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Matière */}
-            <div>
-              <label 
-                htmlFor="select-subject"
-                className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1"
-              >
-                <span>Matière</span>
-                <span className="text-[#EA580C]">*</span>
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-                  <BookOpen className="w-4 h-4 text-[#EA580C]" />
-                </div>
-                <select
-                  id="select-subject"
-                  value={selectedSubjectId}
-                  onChange={e => setSelectedSubjectId(e.target.value)}
-                  disabled={availableSubjects.length === 0}
-                  className="w-full pl-9 pr-8 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#EA580C]/20 focus:border-[#EA580C] cursor-pointer disabled:opacity-50"
-                >
-                  {availableSubjects.map(sub => (
-                    <option key={sub.id} value={sub.id}>
-                      {sub.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                {programs.map(prog => (
+                  <option key={prog.id} value={prog.id}>
+                    {prog.name}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 
-          {/* Active Context Status Pill */}
-          <div className="p-3 bg-orange-50/60 border border-orange-200/60 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-[#EA580C] animate-ping" />
-              <span className="font-semibold text-slate-700">Session de saisie active :</span>
-              <span className="font-bold text-[#EA580C]">
-                {currentProgram?.name} {selectedGroup !== 'all' ? `(Groupe ${selectedGroup})` : ''} • {currentLevel?.name} • {currentSubject?.name}
+          {/* 2. Groupe (auparavant Classe / Groupe) */}
+          <div>
+            <label 
+              htmlFor="select-group"
+              className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between"
+            >
+              <div className="flex items-center gap-1">
+                <span>Groupe</span>
+                <span className="text-[#EA580C]">*</span>
+              </div>
+              <span className="text-[10px] text-slate-400 font-normal">
+                {availableGroups.length > 1 ? `${availableGroups.length} grp` : 'Unique'}
               </span>
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                <Users className="w-4 h-4 text-[#EA580C]" />
+              </div>
+              <select
+                id="select-group"
+                value={selectedGroup}
+                onChange={e => setSelectedGroup(e.target.value)}
+                className="w-full pl-8 pr-6 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#EA580C]/20 focus:border-[#EA580C] cursor-pointer truncate"
+              >
+                <option value="all">Tous ({availableGroups.join(', ')})</option>
+                {availableGroups.map(grp => (
+                  <option key={grp} value={grp}>
+                    Groupe {grp}
+                  </option>
+                ))}
+              </select>
             </div>
-            <span className="text-[11px] text-slate-500 font-medium">
-              {classStudents.length} étudiants dans cette sélection
-            </span>
+          </div>
+
+          {/* 3. Année d'étude */}
+          <div>
+            <label 
+              htmlFor="select-level"
+              className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1"
+            >
+              <span>Année d&apos;étude</span>
+              <span className="text-[#EA580C]">*</span>
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                <GraduationCap className="w-4 h-4 text-[#EA580C]" />
+              </div>
+              <select
+                id="select-level"
+                value={selectedLevelId}
+                onChange={e => setSelectedLevelId(e.target.value)}
+                className="w-full pl-8 pr-6 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#EA580C]/20 focus:border-[#EA580C] cursor-pointer truncate"
+              >
+                {levels.map(lvl => (
+                  <option key={lvl.id} value={lvl.id}>
+                    {lvl.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* 4. Matière */}
+          <div>
+            <label 
+              htmlFor="select-subject"
+              className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1"
+            >
+              <span>Matière</span>
+              <span className="text-[#EA580C]">*</span>
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                <BookOpen className="w-4 h-4 text-[#EA580C]" />
+              </div>
+              <select
+                id="select-subject"
+                value={selectedSubjectId}
+                onChange={e => setSelectedSubjectId(e.target.value)}
+                disabled={availableSubjects.length === 0}
+                className="w-full pl-8 pr-6 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#EA580C]/20 focus:border-[#EA580C] cursor-pointer disabled:opacity-50 truncate"
+              >
+                {availableSubjects.map(sub => (
+                  <option key={sub.id} value={sub.id}>
+                    {sub.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* 5. Horaire (après la matière, ex: 08 H - 12 H) */}
+          <div>
+            <label 
+              htmlFor="input-time-range"
+              className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1"
+            >
+              <span>Horaire</span>
+              <span className="text-[#EA580C]">*</span>
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                <Clock className="w-4 h-4 text-[#EA580C]" />
+              </div>
+              <input
+                id="input-time-range"
+                type="text"
+                list="time-range-suggestions"
+                value={selectedTimeRange}
+                onChange={e => setSelectedTimeRange(e.target.value)}
+                placeholder="08 H - 12 H"
+                className="w-full pl-8 pr-2.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#EA580C]/20 focus:border-[#EA580C]"
+              />
+              <datalist id="time-range-suggestions">
+                <option value="08 H - 12 H" />
+                <option value="08 H - 10 H" />
+                <option value="10 H - 12 H" />
+                <option value="14 H - 18 H" />
+                <option value="14 H - 16 H" />
+                <option value="16 H - 18 H" />
+              </datalist>
+            </div>
+          </div>
+
+          {/* 6. Date (au cas où l'enregistrement n'est pas la date du jour) */}
+          <div>
+            <label 
+              htmlFor="input-absence-date"
+              className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1"
+            >
+              <span>Date</span>
+              <span className="text-[#EA580C]">*</span>
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none text-slate-400">
+                <Calendar className="w-4 h-4 text-[#EA580C]" />
+              </div>
+              <input
+                id="input-absence-date"
+                type="date"
+                value={selectedDate}
+                onChange={e => setSelectedDate(e.target.value)}
+                className="w-full pl-8 pr-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#EA580C]/20 focus:border-[#EA580C] cursor-pointer"
+              />
+            </div>
           </div>
         </div>
 
-        {/* Informative Side Card (from Panel 3) */}
-        <div className="lg:col-span-4 bg-orange-50/50 border border-orange-200/70 rounded-2xl p-6 flex flex-col justify-between">
-          <div>
-            <div className="w-10 h-10 rounded-xl bg-orange-100 flex items-center justify-center text-[#EA580C] mb-3">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <h4 className="font-bold text-slate-900 text-sm">Chargement dynamique</h4>
-            <p className="text-xs text-slate-600 mt-2 leading-relaxed">
-              Les étudiants sont chargés automatiquement en fonction de la filière, de l&apos;année et de la matière sélectionnées.
-            </p>
+        {/* Active Context Status Pill */}
+        <div className="p-3 bg-orange-50/60 border border-orange-200/60 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-[#EA580C] animate-ping" />
+            <span className="font-semibold text-slate-700">Session de saisie active :</span>
+            <span className="font-bold text-[#EA580C]">
+              {currentProgram?.name} {selectedGroup !== 'all' ? `(Groupe ${selectedGroup})` : ''} • {currentLevel?.name} • {currentSubject?.name} • {selectedTimeRange || '08 H - 12 H'} • {selectedDate ? formatFrenchDate(selectedDate) : 'Aujourd\'hui'}
+            </span>
           </div>
-
-          <div className="mt-4 pt-3 border-t border-orange-200/50 text-[11px] text-slate-500 flex items-center gap-1.5 font-medium">
-            <ShieldCheck className="w-4 h-4 text-[#EA580C] flex-shrink-0" />
-            <span>Aucune saisie manuelle de date, heure ou classe requise.</span>
+          <div className="flex items-center gap-3 text-[11px] text-slate-500 font-medium">
+            <span>{classStudents.length} étudiants filtrés</span>
+            <span className="hidden sm:inline text-slate-300">•</span>
+            <span className="hidden sm:inline text-slate-500">Chargement automatique selon la sélection</span>
           </div>
         </div>
       </div>
@@ -696,7 +744,7 @@ export const NewAbsenceView: React.FC<NewAbsenceViewProps> = ({ onViewStudentHis
                               {student.lastName} <span className="font-semibold">{student.firstName}</span>
                             </p>
                             <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-orange-100 text-[#EA580C]">
-                              Classe {student.classGroup || 'A'}
+                              Groupe {student.classGroup || 'A'}
                             </span>
                           </div>
                           <p className="text-xs text-slate-500 truncate">
@@ -748,9 +796,13 @@ export const NewAbsenceView: React.FC<NewAbsenceViewProps> = ({ onViewStudentHis
                       <span>•</span>
                       <span>Filière : <strong className="text-slate-900">{selectedStudent.programName}</strong></span>
                       <span>•</span>
-                      <span>Classe : <strong className="text-[#EA580C] font-bold">Groupe {selectedStudent.classGroup || 'A'}</strong></span>
+                      <span>Groupe : <strong className="text-[#EA580C] font-bold">{selectedStudent.classGroup || 'A'}</strong></span>
                       <span>•</span>
                       <span>Niveau : <strong className="text-slate-900">{selectedStudent.levelName}</strong></span>
+                      <span>•</span>
+                      <span>Horaire : <strong className="text-slate-900">{selectedTimeRange}</strong></span>
+                      <span>•</span>
+                      <span>Date : <strong className="text-slate-900">{selectedDate ? formatFrenchDate(selectedDate) : 'Aujourd\'hui'}</strong></span>
                     </div>
                     <div className="mt-2">
                       <span className="inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-full bg-orange-100 text-[#EA580C]">
@@ -776,7 +828,7 @@ export const NewAbsenceView: React.FC<NewAbsenceViewProps> = ({ onViewStudentHis
               <div className="pt-2 border-t border-orange-200/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="text-xs text-slate-500 flex items-center gap-2 font-medium">
                   <Clock className="w-4 h-4 text-[#EA580C]" />
-                  <span>Enregistrement automatique immédiat en <strong>{currentSubject?.name}</strong></span>
+                  <span>Enregistrement pour le <strong>{selectedDate ? formatFrenchDate(selectedDate) : 'Aujourd\'hui'}</strong> ({selectedTimeRange}) en <strong>{currentSubject?.name}</strong></span>
                 </div>
 
                 <button
@@ -872,7 +924,7 @@ export const NewAbsenceView: React.FC<NewAbsenceViewProps> = ({ onViewStudentHis
                           {student.lastName} {student.firstName}
                         </p>
                         <span className="text-[10px] font-black uppercase px-1.5 py-0.5 rounded bg-orange-100 text-[#EA580C]">
-                          Classe {student.classGroup || 'A'}
+                          Groupe {student.classGroup || 'A'}
                         </span>
                       </div>
                       <p className="text-[11px] text-slate-400 font-mono">
