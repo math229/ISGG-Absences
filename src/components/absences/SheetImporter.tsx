@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { 
   UploadCloud, 
   FileText, 
@@ -24,8 +24,11 @@ import {
   X,
   AlertCircle,
   HelpCircle,
-  FileCheck2
+  FileCheck2,
+  Key,
+  Sparkles
 } from 'lucide-react';
+import { ApiKeyConfigModal, UserAiConfig } from '../common/ApiKeyConfigModal';
 import { 
   ParsedSheetData, 
   ExtractedSession, 
@@ -98,6 +101,28 @@ export const SheetImporter: React.FC<SheetImporterProps> = ({
     sheetDate: string;
   } | null>(null);
 
+  // Custom AI Key (BYOK) state
+  const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
+  const [userAiConfig, setUserAiConfig] = useState<UserAiConfig | null>(null);
+
+  const refreshAiConfig = () => {
+    try {
+      const stored = localStorage.getItem('isgg_user_ai_config');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.apiKey) {
+          setUserAiConfig(parsed);
+          return;
+        }
+      }
+    } catch {}
+    setUserAiConfig(null);
+  };
+
+  useEffect(() => {
+    refreshAiConfig();
+  }, []);
+
   // Trigger file select
   const handleSelectFileClick = () => {
     fileInputRef.current?.click();
@@ -134,6 +159,9 @@ export const SheetImporter: React.FC<SheetImporterProps> = ({
     setPhase('analyzing');
     setCurrentStepIndex(0);
 
+    // Run extraction in background while visual feedback steps animate
+    const extractionPromise = dataExtractor();
+
     for (let i = 0; i < ANALYSIS_STEPS.length; i++) {
       setCurrentStepIndex(i);
       // Realistic step pacing
@@ -141,14 +169,17 @@ export const SheetImporter: React.FC<SheetImporterProps> = ({
     }
 
     try {
-      const result = await dataExtractor();
+      const result = await extractionPromise;
       setParsedData(result);
       // Auto-expand all sessions by default
       setExpandedSessionIds(new Set(result.sessions.map(s => s.id)));
+      if ((result as any).warningNotice) {
+        showToast((result as any).warningNotice, 'info');
+      }
       setPhase('review');
-    } catch (err) {
-      console.error(err);
-      showToast('Erreur lors de l\'analyse du document', 'error');
+    } catch (err: any) {
+      console.warn('Sheet analysis notice:', err);
+      showToast(err?.message || 'Erreur lors de l\'analyse du document', 'error');
       setPhase('idle');
     }
   };
@@ -427,25 +458,51 @@ export const SheetImporter: React.FC<SheetImporterProps> = ({
   if (phase === 'idle') {
     return (
       <div className="space-y-6">
-        {/* Banner with clear instructions */}
+        {/* Banner with clear instructions & BYOK Key Selector */}
         <div className="bg-gradient-to-r from-orange-50 via-amber-50/50 to-white rounded-xl border border-orange-200/80 p-5 shadow-xs">
-          <div className="flex items-start gap-4">
-            <div className="w-10 h-10 rounded-lg bg-orange-600 text-white flex items-center justify-center shrink-0 shadow-xs">
-              <FileSpreadsheet className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-slate-800">
-                  Importer une fiche récapitulative d'absences
-                </h3>
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-orange-100 text-orange-800">
-                  Recommandé
-                </span>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <div className="w-10 h-10 rounded-lg bg-orange-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <FileSpreadsheet className="w-5 h-5" />
               </div>
-              <p className="text-xs text-slate-600 mt-1 max-w-3xl leading-relaxed">
-                Déposez la fiche quotidienne du surveillant (photo, PDF scanné ou fichier Excel). 
-                Le système intelligent détecte automatiquement la <strong>date</strong>, les <strong>classes</strong>, les <strong>matières</strong>, les <strong>horaires</strong> et la liste des <strong>étudiants absents</strong> avec rapprochement automatique.
-              </p>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-base font-bold text-slate-800">
+                    Importer une fiche récapitulative d'absences
+                  </h3>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-orange-100 text-orange-800">
+                    Recommandé
+                  </span>
+                </div>
+                <p className="text-xs text-slate-600 mt-1 max-w-2xl leading-relaxed">
+                  Déposez la fiche quotidienne du surveillant (photo, PDF scanné ou fichier Excel). 
+                  Le système intelligent détecte automatiquement la <strong>date</strong>, les <strong>classes</strong>, les <strong>matières</strong>, les <strong>horaires</strong> et la liste des <strong>étudiants absents</strong> avec rapprochement automatique.
+                </p>
+              </div>
+            </div>
+
+            {/* BYOK Button / Indicator */}
+            <div className="shrink-0 flex items-center">
+              {userAiConfig ? (
+                <button
+                  type="button"
+                  onClick={() => setIsApiKeyModalOpen(true)}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+                >
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <Key className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Clé {userAiConfig.provider.toUpperCase()} active</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setIsApiKeyModalOpen(true)}
+                  className="inline-flex items-center gap-2 px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-300 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+                >
+                  <Key className="w-3.5 h-3.5 text-orange-600" />
+                  <span>Ma clé API (Gemini / Claude / ChatGPT)</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -573,6 +630,12 @@ export const SheetImporter: React.FC<SheetImporterProps> = ({
             </div>
           </div>
         </div>
+
+        <ApiKeyConfigModal 
+          isOpen={isApiKeyModalOpen} 
+          onClose={() => setIsApiKeyModalOpen(false)} 
+          onConfigSaved={refreshAiConfig} 
+        />
       </div>
     );
   }
@@ -803,6 +866,30 @@ export const SheetImporter: React.FC<SheetImporterProps> = ({
           </div>
         </div>
       </div>
+
+      {/* High demand notice banner with 1-click BYOK opener */}
+      {(parsedData as any)?.warningNotice && (
+        <div className="bg-blue-50/90 border border-blue-200/90 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-blue-900 shadow-xs animate-in fade-in">
+          <div className="flex items-start gap-3">
+            <div className="w-8 h-8 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center shrink-0 mt-0.5">
+              <Key className="w-4 h-4" />
+            </div>
+            <div>
+              <h4 className="text-xs font-bold uppercase tracking-wide">Passez sur votre clé API personnelle (Optionnel)</h4>
+              <p className="text-xs text-blue-800 mt-0.5">
+                {(parsedData as any).warningNotice} Connectez votre clé Gemini, ChatGPT ou Claude pour des analyses instantanées sans file d&apos;attente.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsApiKeyModalOpen(true)}
+            className="text-xs font-bold px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors shrink-0 shadow-xs cursor-pointer"
+          >
+            Configurer ma clé API
+          </button>
+        </div>
+      )}
 
       {/* Duplicate Session Warning if detected */}
       {summaryStats.hasDuplicateSession && !ignoreDuplicateWarning && (
@@ -1228,6 +1315,12 @@ export const SheetImporter: React.FC<SheetImporterProps> = ({
           </button>
         </div>
       </div>
+
+      <ApiKeyConfigModal 
+        isOpen={isApiKeyModalOpen} 
+        onClose={() => setIsApiKeyModalOpen(false)} 
+        onConfigSaved={refreshAiConfig} 
+      />
     </div>
   );
 };

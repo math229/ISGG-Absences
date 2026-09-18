@@ -12,11 +12,13 @@ import {
   Info,
   Send,
   Sliders,
-  CheckCircle2
+  CheckCircle2,
+  Key
 } from 'lucide-react';
 import { storage } from '../../lib/storage';
 import { SystemSettings, DEFAULT_SYSTEM_SETTINGS } from '../../types';
 import { useToast } from '../common/Toast';
+import { ApiKeyConfigModal, UserAiConfig } from '../common/ApiKeyConfigModal';
 
 export const SettingsView: React.FC = () => {
   const { showToast } = useToast();
@@ -24,6 +26,26 @@ export const SettingsView: React.FC = () => {
   const [settings, setSettings] = useState<SystemSettings>(storage.getSystemSettings());
   const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
+  const [userAiConfig, setUserAiConfig] = useState<UserAiConfig | null>(null);
+
+  const refreshAiConfig = () => {
+    try {
+      const stored = localStorage.getItem('isgg_user_ai_config');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed.apiKey) {
+          setUserAiConfig(parsed);
+          return;
+        }
+      }
+    } catch {}
+    setUserAiConfig(null);
+  };
+
+  useEffect(() => {
+    refreshAiConfig();
+  }, []);
 
   useEffect(() => {
     const update = () => {
@@ -98,6 +120,57 @@ export const SettingsView: React.FC = () => {
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-semibold text-slate-700 select-none"
               />
             </div>
+          </div>
+        </div>
+
+        {/* Card 1.5: Moteur d'Intelligence Artificielle & Clé Personnelle (BYOK) */}
+        <div className="bg-white rounded-2xl p-6 border border-slate-200/80 shadow-xs space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div className="flex items-center gap-2">
+              <Key className="w-5 h-5 text-[#EA580C]" />
+              <h3 className="font-bold text-base text-slate-900">
+                Moteur d&apos;analyse IA & Clé Personnelle (BYOK)
+              </h3>
+            </div>
+            {userAiConfig ? (
+              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                Clé {userAiConfig.provider.toUpperCase()} active
+              </span>
+            ) : (
+              <span className="text-[11px] font-bold px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">
+                Moteur par défaut ISGG
+              </span>
+            )}
+          </div>
+
+          <p className="text-xs text-slate-600 leading-relaxed">
+            Pour garantir un traitement prioritaire sans interruption ni saturation des quotas partagés lors de l&apos;import de fiches manuscrites, vous pouvez connecter votre propre clé API (Google Gemini, OpenAI ChatGPT ou Anthropic Claude).
+          </p>
+
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-4 bg-slate-50 rounded-xl border border-slate-200/80">
+            <div className="text-xs">
+              <span className="font-bold text-slate-800">Fournisseur actuel : </span>
+              {userAiConfig ? (
+                <span className="font-semibold text-emerald-700">
+                  {userAiConfig.provider === 'gemini' && 'Google Gemini (Quotas personnels prioritaires)'}
+                  {userAiConfig.provider === 'openai' && 'OpenAI ChatGPT (GPT-4o Vision)'}
+                  {userAiConfig.provider === 'anthropic' && 'Anthropic Claude (Claude 3.5 Sonnet)'}
+                </span>
+              ) : (
+                <span className="text-slate-600">
+                  Google Gemini 3.1 Flash Lite (Hébergé par défaut)
+                </span>
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsApiKeyModalOpen(true)}
+              className="px-4 py-2 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 rounded-xl text-xs font-bold shadow-xs transition-colors cursor-pointer"
+            >
+              {userAiConfig ? 'Modifier ma clé API' : 'Configurer ma propre clé API'}
+            </button>
           </div>
         </div>
 
@@ -370,6 +443,12 @@ export const SettingsView: React.FC = () => {
           </button>
         </div>
       </form>
+
+      <ApiKeyConfigModal 
+        isOpen={isApiKeyModalOpen} 
+        onClose={() => setIsApiKeyModalOpen(false)} 
+        onConfigSaved={refreshAiConfig} 
+      />
     </div>
   );
 };

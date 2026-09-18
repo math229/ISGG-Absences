@@ -14,6 +14,34 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script>
+      (function() {
+        function isFirestoreAssert(val) {
+          if (!val) return false;
+          var str = typeof val === 'string' ? val : (val.message || val.stack || '');
+          return str.indexOf('FIRESTORE') !== -1 && (
+            str.indexOf('INTERNAL ASSERTION FAILED') !== -1 ||
+            str.indexOf('Unexpected state') !== -1 ||
+            str.indexOf('ca9') !== -1 ||
+            str.indexOf('b815') !== -1 ||
+            str.indexOf('WatchChangeAggregator') !== -1
+          );
+        }
+        window.addEventListener('error', function(e) {
+          if (isFirestoreAssert(e.error) || isFirestoreAssert(e.message)) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            return true;
+          }
+        }, true);
+        window.addEventListener('unhandledrejection', function(e) {
+          if (isFirestoreAssert(e.reason)) {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+          }
+        }, true);
+      })();
+    </script>
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",

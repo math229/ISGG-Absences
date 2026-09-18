@@ -74,6 +74,18 @@ export function normalizeSearchString(text: string): string {
     .trim();
 }
 
+// Helper to strip any undefined values that could trigger Firestore assertion errors
+export function cleanForFirestore<T extends Record<string, any>>(obj: T): T {
+  if (!obj || typeof obj !== 'object') return obj;
+  const cleaned: any = {};
+  for (const [key, val] of Object.entries(obj)) {
+    if (val !== undefined) {
+      cleaned[key] = val;
+    }
+  }
+  return cleaned;
+}
+
 export function formatISODate(date: Date): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -145,6 +157,7 @@ class StorageService {
   private listeners: Set<() => void> = new Set();
   private syncStatus: SyncStatus = 'syncing';
   private firestoreInitialized = false;
+  private isSyncInitializing = false;
   private firestoreUnsubscribers: (() => void)[] = [];
   private heartbeatInterval: any = null;
   private lastConnectivityCheck = 0;
@@ -420,6 +433,11 @@ class StorageService {
 
   // --- Real-time Firestore Cloud Synchronization ---
   private async initFirestoreSync() {
+    if (this.firestoreInitialized || this.isSyncInitializing) {
+      return;
+    }
+    this.isSyncInitializing = true;
+
     // Clean up existing listeners if any
     if (this.firestoreUnsubscribers.length > 0) {
       this.firestoreUnsubscribers.forEach((unsub) => {
@@ -436,10 +454,7 @@ class StorageService {
         (snapshot) => {
           this.firestoreInitialized = true;
           if (snapshot.empty) {
-            this.absences = [];
-            if (typeof window !== 'undefined') {
-              localStorage.setItem(STORAGE_KEYS.ABSENCES, JSON.stringify([]));
-            }
+            // Keep local state if available, do not wipe
             this.syncStatus = 'connected';
             this.lastConnectivityCheck = Date.now();
             this.notify();
@@ -502,6 +517,61 @@ class StorageService {
       );
       this.firestoreUnsubscribers.push(unsubStudents);
 
+      // 2b. Listen to Sheet Imports History
+      const importsCol = collection(db, 'isgg_sheet_imports');
+      const unsubImports = onSnapshot(
+        importsCol,
+        (snapshot) => {
+          if (!snapshot.empty) {
+            const remoteImports: SheetImportRecord[] = [];
+            snapshot.forEach((docSnap) => {
+              remoteImports.push(docSnap.data() as SheetImportRecord);
+            });
+            this.sheetImports = remoteImports.sort(
+              (a, b) => new Date(b.importedAt).getTime() - new Date(a.importedAt).getTime()
+            );
+            if (typeof window !== 'undefined') {
+              localStorage.setItem(STORAGE_KEYS.SHEET_IMPORTS, JSON.stringify(this.sheetImports));
+            }
+            this.notify();
+          }
+        },
+        (err) => {
+          console.warn('Firestore sheet_imports sync notice:', err);
+        }
+      );
+      this.firestoreUnsubscribers.push(unsubImports);
+
+      // 2c. Listen to Dynamic Subjects
+      const subjectsCol = collection(db, 'isgg_subjects');
+      const unsubSubjects = onSnapshot(
+        subjectsCol,
+        (snapshot) => {
+          if (!snapshot.empty) {
+            const remoteSubs: Subject[] = [];
+            snapshot.forEach((docSnap) => {
+              remoteSubs.push(docSnap.data() as Subject);
+            });
+            const merged = [...this.subjects];
+            remoteSubs.forEach(rs => {
+              const idx = merged.findIndex(s => s.id === rs.id);
+              if (idx !== -1) {
+                merged[idx] = rs;
+              } else {
+                merged.push(rs);
+              }
+            });
+            this.subjects = merged;
+            if (typeof window !== 'undefined') {
+              localStorage.setItem(STORAGE_KEYS.SUBJECTS, JSON.stringify(this.subjects));
+            }
+            this.notify();
+          }
+        },
+        () => {}
+      );
+      this.firestoreUnsubscribers.push(unsubSubjects);
+
       // 3. Listen to Notifications
       const notifsCol = collection(db, 'isgg_notifications');
       const unsubNotifs = onSnapshot(
@@ -562,80 +632,48 @@ class StorageService {
       );
       this.firestoreUnsubscribers.push(unsubUsers);
 
-      // 5. Listen to Security Codes
-      const secDocRef = doc(db, 'isgg_metadata', 'security_codes');
-      const unsubSec = onSnapshot(
-        secDocRef,
-        (docSnap) => {
-          if (docSnap.exists()) {
-            this.securityCodes = docSnap.data() as SecurityCodes;
+      // Fetch metadata documents once asynchronously without multiplexing continuous watch streams
+      (async () => {
+        try {
+          const [secSnap, setSnap, convSnap] = await Promise.all([
+            getDoc(doc(db, 'isgg_metadata', 'security_codes')),
+            getDoc(doc(db, 'isgg_metadata', 'settings')),
+            getDoc(doc(db, 'isgg_metadata', 'convocations')),
+          ]);
+          if (secSnap.exists()) {
+            this.securityCodes = secSnap.data() as SecurityCodes;
             if (typeof window !== 'undefined') {
               localStorage.setItem(STORAGE_KEYS.SECURITY_CODES, JSON.stringify(this.securityCodes));
             }
-            this.notify();
-          } else {
-            setDoc(secDocRef, this.securityCodes, { merge: true }).catch(() => {});
           }
-        },
-        (err) => {
-          console.warn('Firestore security_codes sync notice:', err);
-        }
-      );
-      this.firestoreUnsubscribers.push(unsubSec);
-
-      // 6. Listen to System Settings
-      const settingsDocRef = doc(db, 'isgg_metadata', 'settings');
-      const unsubSettings = onSnapshot(
-        settingsDocRef,
-        (docSnap) => {
-          if (docSnap.exists()) {
+          if (setSnap.exists()) {
             this.settings = {
               ...DEFAULT_SYSTEM_SETTINGS,
-              ...docSnap.data() as SystemSettings,
+              ...(setSnap.data() as SystemSettings),
             };
             if (typeof window !== 'undefined') {
               localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(this.settings));
             }
-            this.notify();
-          } else {
-            setDoc(settingsDocRef, this.settings, { merge: true }).catch(() => {});
           }
-        },
-        (err) => {
-          console.warn('Firestore settings sync notice:', err);
-        }
-      );
-      this.firestoreUnsubscribers.push(unsubSettings);
-
-      // 7. Listen to Convocations
-      const convDocRef = doc(db, 'isgg_metadata', 'convocations');
-      const unsubConv = onSnapshot(
-        convDocRef,
-        (docSnap) => {
-          if (docSnap.exists()) {
-            const data = docSnap.data();
-            if (data && data.records) {
-              this.convocations = data.records as Record<string, ConvocationRecord>;
-              if (typeof window !== 'undefined') {
-                localStorage.setItem(STORAGE_KEYS.CONVOCATIONS, JSON.stringify(this.convocations));
-              }
-              this.notify();
+          if (convSnap.exists() && convSnap.data()?.records) {
+            this.convocations = convSnap.data()!.records as Record<string, ConvocationRecord>;
+            if (typeof window !== 'undefined') {
+              localStorage.setItem(STORAGE_KEYS.CONVOCATIONS, JSON.stringify(this.convocations));
             }
-          } else {
-            setDoc(convDocRef, { records: this.convocations }, { merge: true }).catch(() => {});
           }
-        },
-        (err) => {
-          console.warn('Firestore convocations sync notice:', err);
+          this.notify();
+        } catch (mErr) {
+          console.warn('Metadata initial sync notice:', mErr);
         }
-      );
-      this.firestoreUnsubscribers.push(unsubConv);
+      })();
     } catch (e) {
       console.warn('Could not connect to Firestore listeners:', e);
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         this.syncStatus = 'offline';
       }
       this.notify();
+    } finally {
+      this.isSyncInitializing = false;
     }
   }
 
@@ -668,7 +706,7 @@ class StorageService {
     document.addEventListener('visibilitychange', handleReactivation);
     window.addEventListener('focus', handleReactivation);
 
-    // 3. Periodic lightweight heartbeat every 35 seconds
+    // 3. Periodic lightweight heartbeat every 45 seconds
     this.heartbeatInterval = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
         if (navigator.onLine) {
@@ -680,7 +718,7 @@ class StorageService {
           this.notify();
         }
       }
-    }, 35000);
+    }, 45000);
   }
 
   // Force or retry Firestore Cloud connection
@@ -696,10 +734,7 @@ class StorageService {
     }
 
     try {
-      // Re-enable network in Firestore if it was suspended or detached by browser power-saving
-      await enableNetwork(db).catch(() => {});
-
-      // Ping Firestore metadata document with a timeout
+      // Ping Firestore metadata document with a timeout without forcing socket resets
       const settingsDocRef = doc(db, 'isgg_metadata', 'settings');
       await Promise.race([
         getDoc(settingsDocRef),
@@ -708,17 +743,11 @@ class StorageService {
 
       this.syncStatus = 'connected';
       this.lastConnectivityCheck = Date.now();
-
-      // If listeners were cleared or never registered, restore them
-      if (this.firestoreUnsubscribers.length === 0) {
-        this.initFirestoreSync();
-      }
-
       this.notify();
       this.isCheckingConnectivity = false;
       return true;
     } catch (err) {
-      console.warn('Firestore cloud connection probe failed:', err);
+      console.warn('Firestore cloud connection probe notice:', err);
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         this.syncStatus = 'offline';
       }
@@ -776,7 +805,7 @@ class StorageService {
       this.syncStatus = 'syncing';
       this.notify();
       const ref = doc(db, 'isgg_absences', absence.id);
-      await setDoc(ref, absence, { merge: true });
+      await setDoc(ref, cleanForFirestore(absence), { merge: true });
       this.syncStatus = 'connected';
       this.notify();
     } catch (e) {
@@ -800,9 +829,96 @@ class StorageService {
   private async syncStudentToCloud(student: Student) {
     try {
       const ref = doc(db, 'isgg_students', student.id);
-      await setDoc(ref, student, { merge: true });
+      await setDoc(ref, cleanForFirestore(student), { merge: true });
     } catch (e) {
       console.warn('Could not sync student to Firestore, saved locally:', e);
+    }
+  }
+
+  // Cloud helper: delete student from Cloud asynchronously
+  private async deleteStudentFromCloud(studentId: string) {
+    try {
+      const ref = doc(db, 'isgg_students', studentId);
+      await deleteDoc(ref);
+    } catch (e) {
+      console.warn('Could not delete student from Firestore:', e);
+    }
+  }
+
+  // Cloud helper: sync batch absences to Cloud using Firestore writeBatch
+  public async syncBatchAbsencesToCloud(absences: Absence[]) {
+    if (!absences || absences.length === 0) return;
+    try {
+      this.syncStatus = 'syncing';
+      this.notify();
+
+      const chunkSize = 400;
+      for (let i = 0; i < absences.length; i += chunkSize) {
+        const chunk = absences.slice(i, i + chunkSize);
+        const batch = writeBatch(db);
+        chunk.forEach(a => {
+          const ref = doc(db, 'isgg_absences', a.id);
+          batch.set(ref, cleanForFirestore(a), { merge: true });
+        });
+        await batch.commit();
+      }
+
+      this.syncStatus = 'connected';
+      this.lastConnectivityCheck = Date.now();
+      this.notify();
+    } catch (e) {
+      console.warn('Could not batch sync absences to Firestore:', e);
+      this.syncStatus = 'offline';
+      this.notify();
+    }
+  }
+
+  // Cloud helper: sync batch students to Cloud using Firestore writeBatch
+  public async syncBatchStudentsToCloud(students: Student[]) {
+    if (!students || students.length === 0) return;
+    try {
+      const chunkSize = 400;
+      for (let i = 0; i < students.length; i += chunkSize) {
+        const chunk = students.slice(i, i + chunkSize);
+        const batch = writeBatch(db);
+        chunk.forEach(s => {
+          const ref = doc(db, 'isgg_students', s.id);
+          batch.set(ref, cleanForFirestore(s), { merge: true });
+        });
+        await batch.commit();
+      }
+    } catch (e) {
+      console.warn('Could not batch sync students to Firestore:', e);
+    }
+  }
+
+  // Cloud helper: sync sheet import record to Cloud
+  public async syncSheetImportToCloud(importRec: SheetImportRecord) {
+    try {
+      const ref = doc(db, 'isgg_sheet_imports', importRec.id);
+      await setDoc(ref, cleanForFirestore(importRec), { merge: true });
+    } catch (e) {
+      console.warn('Could not sync sheet import record to Firestore:', e);
+    }
+  }
+
+  // Cloud helper: sync subject to Cloud
+  public async syncSubjectToCloud(subject: Subject) {
+    try {
+      const ref = doc(db, 'isgg_subjects', subject.id);
+      await setDoc(ref, subject, { merge: true });
+    } catch (e) {
+      console.warn('Could not sync subject to Firestore:', e);
+    }
+  }
+
+  // Cloud helper: sync program to Cloud
+  public async syncProgramToCloud(prog: Program) {
+    try {
+      const ref = doc(db, 'isgg_programs', prog.id);
+      await setDoc(ref, prog, { merge: true });
+    } catch (e) {
+      console.warn('Could not sync program to Firestore:', e);
     }
   }
 
@@ -2148,6 +2264,7 @@ class StorageService {
       this.programs.push(prog);
       this.persistPrograms();
       this.notify();
+      this.syncProgramToCloud(prog);
     }
 
     return prog;
@@ -2180,6 +2297,10 @@ class StorageService {
     // 0. Academic aliases and abbreviations detection (ISGG)
     if (norm === 'ceo ii' || norm === 'ceo 2' || norm === 'ceo2' || norm.includes('communication ecrite 2') || norm.includes('communication ecrite et orale 2')) {
       const match = this.subjects.find(s => s.id === 'sub-l2-communication-ecrite-2');
+      if (match) return match;
+    }
+    if (norm.includes('algo avance') || norm.includes('algorithmique avance') || norm.includes('algorithmes avance')) {
+      const match = this.subjects.find(s => s.id === 'sub-l2-algo-avances' || s.id === 'sub-l2-algorithmes-avances');
       if (match) return match;
     }
     if (norm === 'ceo i' || norm === 'ceo 1' || norm === 'ceo1' || norm.includes('communication ecrite et orale 1')) {
@@ -2236,6 +2357,7 @@ class StorageService {
       this.subjects.push(sub);
       this.persistSubjects();
       this.notify();
+      this.syncSubjectToCloud(sub);
     }
 
     return sub;
@@ -2267,6 +2389,7 @@ class StorageService {
       }
       if (updated) {
         this.persistStudents();
+        this.syncStudentToCloud(existing);
       }
       return { student: existing, isNew: false };
     }
@@ -2289,6 +2412,7 @@ class StorageService {
     this.students.push(newStudent);
     this.persistStudents();
     this.notify();
+    this.syncStudentToCloud(newStudent);
 
     return { student: newStudent, isNew: true };
   }
@@ -2424,6 +2548,9 @@ class StorageService {
     this.persistAbsences();
     this.notify();
 
+    // Direct Cloud Batch Sync to Firestore in real-time
+    this.syncBatchAbsencesToCloud(createdList);
+
     return createdList;
   }
 
@@ -2435,6 +2562,10 @@ class StorageService {
     this.sheetImports.unshift(newRecord);
     this.persistSheetImports();
     this.notify();
+
+    // Direct Cloud sync to Firestore in real-time
+    this.syncSheetImportToCloud(newRecord);
+
     return newRecord;
   }
 

@@ -3,7 +3,7 @@ import { initializeFirestore, getFirestore, setLogLevel } from 'firebase/firesto
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Global resilience handler: prevents internal Firestore SDK stream assertion bugs
-// (such as rapid bulk deletions leading to internal WatchChangeAggregator targetId discrepancies)
+// (such as rapid stream reconnections leading to internal WatchChangeAggregator targetId discrepancies)
 // from bubbling up as uncaught fatal errors in the browser or interrupting UI interaction.
 if (typeof window !== 'undefined') {
   const isFirestoreAssertion = (err: unknown): boolean => {
@@ -12,6 +12,7 @@ if (typeof window !== 'undefined') {
       (err as any)?.message ||
       (err as any)?.reason?.message ||
       (err as any)?.stack ||
+      (err as any)?.reason?.stack ||
       (typeof err === 'string' ? err : JSON.stringify(err)) ||
       ''
     );
@@ -19,6 +20,7 @@ if (typeof window !== 'undefined') {
       msg.includes('FIRESTORE') &&
       (msg.includes('INTERNAL ASSERTION FAILED') ||
         msg.includes('Unexpected state') ||
+        msg.includes('WatchChangeAggregator') ||
         msg.includes('ca9') ||
         msg.includes('b815'))
     );
@@ -38,7 +40,7 @@ if (typeof window !== 'undefined') {
           combined.includes('ca9') ||
           combined.includes('b815'))
       ) {
-        console.warn('[ISGG Cloud Sync] Safely handled internal Firestore stream assertion.');
+        console.warn('[ISGG Cloud Sync] Handled internal Firestore stream notice.');
         return;
       }
 
@@ -52,7 +54,7 @@ if (typeof window !== 'undefined') {
       if (isFirestoreAssertion(event.error) || isFirestoreAssertion(event.message)) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        console.warn('[ISGG Cloud Sync] Prevented unhandled Firestore assertion.');
+        console.warn('[ISGG Cloud Sync] Handled internal Firestore assertion.');
         return true;
       }
     },
@@ -65,7 +67,7 @@ if (typeof window !== 'undefined') {
       if (isFirestoreAssertion(event.reason)) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        console.warn('[ISGG Cloud Sync] Prevented unhandled Firestore rejection.');
+        console.warn('[ISGG Cloud Sync] Handled internal Firestore rejection.');
       }
     },
     true
@@ -89,6 +91,7 @@ function getOrCreateFirestore() {
       app,
       {
         experimentalAutoDetectLongPolling: true,
+        ignoreUndefinedProperties: true,
       },
       firebaseConfig.firestoreDatabaseId || undefined
     );

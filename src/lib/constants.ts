@@ -78,6 +78,7 @@ export const INITIAL_SUBJECTS: Subject[] = [
   { id: 'sub-l2-recherche-operationnelle', name: 'Recherche Opérationnelle', code: '', programId: 'prog-gi', levelId: 'lvl-l2', teacherName: 'Dr. Mensah' },
   { id: 'sub-l2-algorithmes-avances', name: 'Algorithmes avancés', code: '', programId: 'prog-gi', levelId: 'lvl-l2', teacherName: 'M. Sossou' },
   { id: 'sub-l2-theorie-des-graphes', name: 'Théorie des graphes (Programmation)', code: '', programId: 'prog-gi', levelId: 'lvl-l2', teacherName: 'Pr. Hounnou' },
+  { id: 'sub-l2-algo-avances', name: 'Algorithmique Avancée (Algo Avancés)', code: 'Algo Avancés', programId: 'prog-gi', levelId: 'lvl-l2', teacherName: 'M. Sossou' },
   { id: 'sub-l2-communication-ecrite-2', name: 'Communication Écrite et Orale 2 (CEO II)', code: 'CEO II', programId: 'prog-gi', levelId: 'lvl-l2', teacherName: 'Mme. Houinato' },
   { id: 'sub-l2-anglais-2', name: 'Anglais II', code: '', programId: 'prog-gi', levelId: 'lvl-l2', teacherName: 'M. Johnson' },
   { id: 'sub-l2-deuxieme-langue-chinois', name: 'Deuxième langue vivante niveau 1 (Chinois)', code: '', programId: 'prog-gi', levelId: 'lvl-l2', teacherName: 'Mme. Wang' },
