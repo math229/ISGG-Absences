@@ -1455,7 +1455,7 @@ class StorageService {
       };
     }
 
-    const resetResult = await emailOtpService.sendPasswordResetOtp(cleanEmail);
+    const resetResult = await emailOtpService.sendPasswordResetOtp(cleanEmail, user.name, user.role);
     if (!resetResult.success) {
       return { success: false, message: resetResult.message };
     }

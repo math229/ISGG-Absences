@@ -165,11 +165,12 @@ class EmailOtpService {
   }
 
   /**
-   * Expédie un code OTP pour la réinitialisation de mot de passe (généré côté serveur)
+   * Expédie un code OTP pour la réinitialisation de mot de passe (serveur API ou repli direct Firestore)
    */
-  public async sendPasswordResetOtp(email: string): Promise<DispatchResult> {
+  public async sendPasswordResetOtp(email: string, recipientName?: string, role?: string): Promise<DispatchResult> {
     const cleanEmail = email.trim().toLowerCase();
 
+    // 1. Tenter via l'API serveur Node/Express
     try {
       const response = await fetch('/api/otp/send-password-reset', {
         method: 'POST',
@@ -177,39 +178,83 @@ class EmailOtpService {
         body: JSON.stringify({ email: cleanEmail }),
       });
 
-      const data = await response.json();
-      if (!response.ok) {
+      if (response.ok) {
+        const data = await response.json();
         return {
-          success: false,
-          delivered: false,
-          message: data.message || 'Impossible d\'expédier le code de réinitialisation.',
+          success: true,
+          delivered: !!data.delivered,
+          warning: data.warning,
+          smtpError: data.smtpError,
+          message: data.message || `Code de réinitialisation envoyé avec succès à ${cleanEmail}.`,
         };
+      } else {
+        const data = await response.json().catch(() => ({}));
+        // Si le serveur a répondu une erreur explicite (ex: compte introuvable), la retourner
+        if (response.status === 404 || response.status === 400) {
+          return {
+            success: false,
+            delivered: false,
+            message: data.message || 'Impossible d\'expédier le code de réinitialisation.',
+          };
+        }
       }
+    } catch (err) {
+      console.warn('API /api/otp/send-password-reset injoignable, basculement vers le canal de secours Firestore:', err);
+    }
+
+    // 2. Repli de secours autonome via Firestore (pour les déploiements Vercel ou en cas de coupure de l'API)
+    try {
+      const code = this.generate6DigitCode();
+      const expiresAt = Date.now() + 15 * 60 * 1000;
+      const docRef = doc(db, 'isgg_password_resets', cleanEmail);
+      
+      await setDoc(docRef, {
+        email: cleanEmail,
+        code,
+        expiresAt,
+        attempts: 0,
+        verified: false,
+        purpose: 'PASSWORD_RESET',
+        createdAt: new Date().toISOString(),
+      }, { merge: true });
+
+      // Tenter l'envoi d'email SMTP via le serveur
+      const mailResult = await this.dispatchServerEmail({
+        to: cleanEmail,
+        code,
+        purpose: 'PASSWORD_RESET',
+        recipientName: recipientName || 'Utilisateur ISGG',
+        role,
+        subject: `[ISGG] Code de réinitialisation de mot de passe : ${code}`,
+      });
 
       return {
         success: true,
-        delivered: !!data.delivered,
-        warning: data.warning,
-        smtpError: data.smtpError,
-        message: data.message || `Code de réinitialisation envoyé avec succès à ${cleanEmail}.`,
+        delivered: mailResult.delivered,
+        warning: mailResult.warning,
+        smtpError: mailResult.smtpError,
+        message: mailResult.delivered
+          ? `Code officiel de réinitialisation expédié par email à ${cleanEmail}.`
+          : `Code généré avec succès pour ${cleanEmail}. Si vous ne recevez pas l'email, vous pouvez valider avec votre code d'habilitation officiel.`,
       };
-    } catch (err) {
-      console.warn('Erreur appel /api/otp/send-password-reset:', err);
+    } catch (fallbackErr: any) {
+      console.error('Erreur secours réinitialisation mot de passe:', fallbackErr);
       return {
         success: false,
         delivered: false,
-        message: 'Impossible de joindre le serveur pour la réinitialisation.',
+        message: 'Impossible de joindre le service de réinitialisation. Veuillez vérifier votre connexion ou contacter le secrétariat.',
       };
     }
   }
 
   /**
-   * Vérifie le code OTP de réinitialisation de mot de passe (côté serveur)
+   * Vérifie le code OTP de réinitialisation de mot de passe (côté serveur ou repli direct Firestore)
    */
   public async verifyPasswordResetOtp(email: string, enteredCode: string): Promise<{ success: boolean; message: string }> {
     const cleanEmail = email.trim().toLowerCase();
     const cleanEntered = enteredCode.replace(/\D/g, '').trim();
 
+    // 1. Tenter via API Serveur
     try {
       const response = await fetch('/api/otp/verify-password-reset', {
         method: 'POST',
@@ -220,20 +265,55 @@ class EmailOtpService {
         }),
       });
 
-      const data = await response.json();
-      if (!response.ok) {
+      if (response.ok) {
+        const data = await response.json();
+        return {
+          success: true,
+          message: data.message || 'Code validé avec succès.',
+        };
+      } else if (response.status === 400 || response.status === 404 || response.status === 410 || response.status === 429) {
+        const data = await response.json().catch(() => ({}));
         return {
           success: false,
           message: data.message || 'Code de réinitialisation invalide.',
         };
       }
-
-      return {
-        success: true,
-        message: data.message || 'Code validé avec succès.',
-      };
     } catch (err) {
-      console.warn('Erreur appel /api/otp/verify-password-reset:', err);
+      console.warn('API /api/otp/verify-password-reset injoignable, basculement vers la vérification Firestore:', err);
+    }
+
+    // 2. Repli de secours via Firestore
+    try {
+      const docRef = doc(db, 'isgg_password_resets', cleanEmail);
+      const snap = await getDoc(docRef);
+
+      if (!snap.exists()) {
+        return { success: false, message: 'Aucun code actif trouvé pour cet email.' };
+      }
+
+      const data = snap.data();
+      if (Date.now() > (data.expiresAt || 0)) {
+        return { success: false, message: 'Le code a expiré. Veuillez redemander un code.' };
+      }
+
+      if ((data.attempts || 0) >= 5) {
+        return { success: false, message: 'Trop de tentatives erronées. Veuillez redemander un nouveau code.' };
+      }
+
+      if (String(data.code).trim() !== cleanEntered) {
+        const newAttempts = (data.attempts || 0) + 1;
+        await updateDoc(docRef, { attempts: newAttempts }).catch(() => {});
+        const remaining = 5 - newAttempts;
+        return {
+          success: false,
+          message: `Code incorrect. Il vous reste ${remaining} tentative(s).`,
+        };
+      }
+
+      await updateDoc(docRef, { verified: true }).catch(() => {});
+      return { success: true, message: 'Code de sécurité validé.' };
+    } catch (fallbackErr: any) {
+      console.error('Erreur vérification Firestore OTP:', fallbackErr);
       return {
         success: false,
         message: 'Erreur technique lors de la vérification du code de réinitialisation.',
